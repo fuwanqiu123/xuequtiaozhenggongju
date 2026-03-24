@@ -6272,6 +6272,9 @@
         
         console.log('GIS应用初始化完成');
         showMessage('GIS应用已就绪！已创建默认文件', 'success');
+        
+        // 检查是否需要显示向导（首次访问）
+        initTourGuide();
     }
     
     // 启动应用
@@ -6280,5 +6283,275 @@
     } else {
         initApp();
     }
+    
+    // ========== 用户向导功能 ==========
+    
+    // 向导配置
+    const TOUR_STEPS = [
+        {
+            selector: '#importGeoJSON',
+            title: '导入学区文件',
+            content: '请点击这里，导入您的学区文件，比如<span style="color:#e74c3c;font-weight:600;">滴水湖学校教育集团南天校区.geojson</span>',
+            position: 'bottom'
+        },
+        {
+            selector: '#selectPolygon, #editPolygon, #deletePolygon, #deleteVertex',
+            title: '学区图形编辑',
+            content: '这里可以选中、编辑您的学区图形，您可以拖拽顶点、按<span style="color:#e74c3c;font-weight:600;">DELETE</span>删除顶点',
+            position: 'bottom',
+            groupHighlight: true
+        },
+        {
+            selector: '#exportGeoJSON',
+            title: '导出修改后的学区',
+            content: '这里可以保存您修改后的学区文件。导出后建议您再导入进来确认下~',
+            position: 'bottom'
+        },
+        {
+            selector: '#toggleAllFilesVisibility',
+            title: '隐藏/显示学区',
+            content: '这里可以隐藏/显示您的学区文件，方便查看底图',
+            position: 'right'
+        },
+        {
+            selector: '#toggleImageLayer',
+            title: '切换影像底图',
+            content: '这里可以切换至高清影像，查看更清晰的地图细节',
+            position: 'left'
+        },
+        {
+            selector: '#searchInput',
+            title: '地名搜索',
+            content: '这里可以搜索地址，快速定位到您需要的地点',
+            position: 'bottom'
+        }
+    ];
+    
+    let tourCurrentStep = 0;
+    let tourActive = false;
+    let highlightedElements = [];
+    
+    // 初始化向导
+    function initTourGuide() {
+        // 检查是否已经看过向导
+        const hasSeenTour = localStorage.getItem('gisAppTourCompleted');
+        
+        // 绑定重新查看向导按钮
+        $('#tourStartBtn').on('click', function() {
+            startTour();
+        });
+        
+        // 绑定跳过按钮
+        $('#tourSkipBtn').on('click', function() {
+            endTour();
+            localStorage.setItem('gisAppTourCompleted', 'true');
+        });
+        
+        // 绑定下一步按钮
+        $('#tourNextBtn').on('click', function() {
+            nextTourStep();
+        });
+        
+        // 点击遮罩层也可以跳过
+        $('#tourOverlay').on('click', function() {
+            endTour();
+            localStorage.setItem('gisAppTourCompleted', 'true');
+        });
+        
+        // 首次访问自动显示向导
+        if (!hasSeenTour) {
+            // 延迟启动，确保页面完全渲染
+            setTimeout(function() {
+                startTour();
+            }, 1000);
+        }
+    }
+    
+    // 开始向导
+    function startTour() {
+        tourCurrentStep = 0;
+        tourActive = true;
+        $('#tourOverlay').addClass('active');
+        $('#tourStartBtn').addClass('hidden');
+        $('#tourTotalSteps').text(TOUR_STEPS.length);
+        showTourStep();
+    }
+    
+    // 结束向导
+    function endTour() {
+        tourActive = false;
+        $('#tourOverlay').removeClass('active');
+        $('#tourTooltip').removeClass('active');
+        $('#tourStartBtn').removeClass('hidden');
+        clearHighlights();
+    }
+    
+    // 显示当前步骤
+    function showTourStep() {
+        if (tourCurrentStep >= TOUR_STEPS.length) {
+            // 向导完成
+            endTour();
+            localStorage.setItem('gisAppTourCompleted', 'true');
+            showMessage('向导完成！您可以点击右下角问号按钮重新查看', 'success');
+            return;
+        }
+        
+        const step = TOUR_STEPS[tourCurrentStep];
+        const $elements = $(step.selector);
+        
+        if ($elements.length === 0) {
+            // 元素未找到，跳过这一步
+            console.warn('向导元素未找到:', step.selector);
+            tourCurrentStep++;
+            showTourStep();
+            return;
+        }
+        
+        // 清除之前的高亮
+        clearHighlights();
+        
+        // 高亮当前元素
+        $elements.each(function() {
+            $(this).addClass('tour-highlight');
+            highlightedElements.push(this);
+        });
+        
+        // 更新提示内容
+        $('#tourContent').html(step.content);
+        $('.tour-tooltip-title').text(step.title);
+        $('#tourCurrentStep').text(tourCurrentStep + 1);
+        
+        // 更新按钮文字
+        if (tourCurrentStep === TOUR_STEPS.length - 1) {
+            $('#tourNextBtn').text('完成').removeClass('tour-btn-next').addClass('tour-btn-finish');
+        } else {
+            $('#tourNextBtn').text('下一步').removeClass('tour-btn-finish').addClass('tour-btn-next');
+        }
+        
+        // 定位提示框
+        positionTooltip($elements.first(), step.position);
+        
+        // 显示提示框
+        $('#tourTooltip').addClass('active');
+        
+        // 滚动到元素（如果需要）
+        scrollToElement($elements.first());
+    }
+    
+    // 下一步
+    function nextTourStep() {
+        tourCurrentStep++;
+        showTourStep();
+    }
+    
+    // 清除高亮
+    function clearHighlights() {
+        highlightedElements.forEach(function(el) {
+            $(el).removeClass('tour-highlight');
+        });
+        highlightedElements = [];
+    }
+    
+    // 定位提示框
+    function positionTooltip($target, position) {
+        const $tooltip = $('#tourTooltip');
+        const targetRect = $target[0].getBoundingClientRect();
+        const tooltipRect = $tooltip[0].getBoundingClientRect();
+        const margin = 15;
+        
+        let top, left;
+        
+        // 根据位置计算坐标
+        switch (position) {
+            case 'bottom':
+                top = targetRect.bottom + margin;
+                left = targetRect.left + (targetRect.width / 2) - (tooltipRect.width / 2);
+                $tooltip.removeClass('arrow-top arrow-left arrow-right').addClass('arrow-bottom');
+                break;
+            case 'top':
+                top = targetRect.top - tooltipRect.height - margin;
+                left = targetRect.left + (targetRect.width / 2) - (tooltipRect.width / 2);
+                $tooltip.removeClass('arrow-bottom arrow-left arrow-right').addClass('arrow-top');
+                break;
+            case 'left':
+                top = targetRect.top + (targetRect.height / 2) - (tooltipRect.height / 2);
+                left = targetRect.left - tooltipRect.width - margin;
+                $tooltip.removeClass('arrow-top arrow-bottom arrow-right').addClass('arrow-left');
+                break;
+            case 'right':
+                top = targetRect.top + (targetRect.height / 2) - (tooltipRect.height / 2);
+                left = targetRect.right + margin;
+                $tooltip.removeClass('arrow-top arrow-bottom arrow-left').addClass('arrow-right');
+                break;
+            default:
+                top = targetRect.bottom + margin;
+                left = targetRect.left;
+        }
+        
+        // 边界检查，确保提示框在视口内
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        
+        // 水平边界检查
+        if (left < 10) {
+            left = 10;
+        } else if (left + tooltipRect.width > viewportWidth - 10) {
+            left = viewportWidth - tooltipRect.width - 10;
+        }
+        
+        // 垂直边界检查
+        if (top < 10) {
+            // 如果上方空间不足，改为显示在下方
+            top = targetRect.bottom + margin;
+            $tooltip.removeClass('arrow-bottom arrow-left arrow-right').addClass('arrow-top');
+        } else if (top + tooltipRect.height > viewportHeight - 10) {
+            // 如果下方空间不足，改为显示在上方
+            top = targetRect.top - tooltipRect.height - margin;
+            $tooltip.removeClass('arrow-top arrow-left arrow-right').addClass('arrow-bottom');
+        }
+        
+        $tooltip.css({
+            top: top + 'px',
+            left: left + 'px'
+        });
+    }
+    
+    // 滚动到元素
+    function scrollToElement($element) {
+        const elementRect = $element[0].getBoundingClientRect();
+        const isInViewport = elementRect.top >= 0 && 
+                             elementRect.bottom <= window.innerHeight &&
+                             elementRect.left >= 0 && 
+                             elementRect.right <= window.innerWidth;
+        
+        if (!isInViewport) {
+            // 如果侧边栏是折叠状态，先展开
+            if ($element.closest('.sidebar.collapsed').length > 0) {
+                const sidebarId = $element.closest('.sidebar').attr('id');
+                if (sidebarId === 'sidebar') {
+                    $('#sidebarToggle').click();
+                } else if (sidebarId === 'rightSidebar') {
+                    $('#rightSidebarToggle').click();
+                }
+            }
+            
+            $element[0].scrollIntoView({
+                behavior: 'smooth',
+                block: 'center',
+                inline: 'center'
+            });
+        }
+    }
+    
+    // 窗口大小改变时重新定位
+    $(window).on('resize', function() {
+        if (tourActive && tourCurrentStep < TOUR_STEPS.length) {
+            const step = TOUR_STEPS[tourCurrentStep];
+            const $element = $(step.selector).first();
+            if ($element.length > 0) {
+                positionTooltip($element, step.position);
+            }
+        }
+    });
     
 })();

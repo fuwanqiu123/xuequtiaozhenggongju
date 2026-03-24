@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>XX市学区范围绘制工具</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v8.2.0/ol.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="fontawesome.min.css">
     <link rel="stylesheet" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/ol@v8.2.0/dist/ol.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
@@ -261,5 +261,23 @@
     </div>
 
     <script src="app.js"></script>
+    
+    <!-- 用户向导 -->
+    <div id="tourOverlay" class="tour-overlay"></div>
+    <div id="tourTooltip" class="tour-tooltip">
+        <div class="tour-tooltip-header">
+            <div class="tour-tooltip-icon"><i class="fas fa-lightbulb"></i></div>
+            <h4 class="tour-tooltip-title">功能提示</h4>
+        </div>
+        <div class="tour-tooltip-content" id="tourContent"></div>
+        <div class="tour-tooltip-footer">
+            <div class="tour-step-indicator">步骤 <span id="tourCurrentStep">1</span> / <span id="tourTotalSteps">6</span></div>
+            <div class="tour-buttons">
+                <button class="tour-btn tour-btn-skip" id="tourSkipBtn">跳过</button>
+                <button class="tour-btn tour-btn-next" id="tourNextBtn">下一步</button>
+            </div>
+        </div>
+    </div>
+    <button id="tourStartBtn" class="tour-start-btn" title="重新查看向导"><i class="fas fa-question-circle"></i></button>
 </body>
 </html>

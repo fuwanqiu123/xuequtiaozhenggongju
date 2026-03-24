@@ -1507,3 +1507,213 @@ body {
     background: #e74c3c;
     color: white;
 }
+
+/* ========== 用户向导样式 ========== */
+.tour-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 9998;
+    display: none;
+}
+
+.tour-overlay.active {
+    display: block;
+}
+
+.tour-highlight {
+    position: relative;
+    z-index: 9999 !important;
+    box-shadow: 0 0 0 4px #3498db, 0 0 20px rgba(52, 152, 219, 0.5) !important;
+    border-radius: 4px;
+    animation: tourPulse 2s ease-in-out infinite;
+}
+
+@keyframes tourPulse {
+    0%, 100% { box-shadow: 0 0 0 4px #3498db, 0 0 20px rgba(52, 152, 219, 0.5); }
+    50% { box-shadow: 0 0 0 6px #3498db, 0 0 30px rgba(52, 152, 219, 0.8); }
+}
+
+.tour-tooltip {
+    position: fixed;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    padding: 20px;
+    z-index: 10000;
+    max-width: 360px;
+    min-width: 280px;
+    display: none;
+    border: 2px solid #3498db;
+}
+
+.tour-tooltip.active {
+    display: block;
+    animation: tourFadeIn 0.3s ease;
+}
+
+@keyframes tourFadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.tour-tooltip-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.tour-tooltip-icon {
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, #3498db, #2980b9);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 16px;
+}
+
+.tour-tooltip-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #2c3e50;
+    margin: 0;
+}
+
+.tour-tooltip-content {
+    font-size: 14px;
+    color: #555;
+    line-height: 1.6;
+    margin-bottom: 16px;
+}
+
+.tour-tooltip-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.tour-step-indicator {
+    font-size: 13px;
+    color: #7f8c8d;
+    font-weight: 500;
+}
+
+.tour-step-indicator span {
+    color: #3498db;
+    font-weight: 700;
+}
+
+.tour-buttons {
+    display: flex;
+    gap: 10px;
+}
+
+.tour-btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.tour-btn-skip {
+    background: #ecf0f1;
+    color: #7f8c8d;
+}
+
+.tour-btn-skip:hover {
+    background: #bdc3c7;
+    color: #2c3e50;
+}
+
+.tour-btn-next {
+    background: linear-gradient(135deg, #3498db, #2980b9);
+    color: white;
+}
+
+.tour-btn-next:hover {
+    background: linear-gradient(135deg, #2980b9, #1f5a8a);
+    transform: translateY(-1px);
+}
+
+.tour-btn-finish {
+    background: linear-gradient(135deg, #2ecc71, #27ae60);
+    color: white;
+}
+
+.tour-btn-finish:hover {
+    background: linear-gradient(135deg, #27ae60, #1e8a4a);
+    transform: translateY(-1px);
+}
+
+/* 向导箭头 */
+.tour-tooltip::before {
+    content: '';
+    position: absolute;
+    width: 0;
+    height: 0;
+    border: 10px solid transparent;
+}
+
+.tour-tooltip.arrow-top::before {
+    top: -20px;
+    left: 30px;
+    border-bottom-color: #3498db;
+}
+
+.tour-tooltip.arrow-bottom::before {
+    bottom: -20px;
+    left: 30px;
+    border-top-color: #3498db;
+}
+
+.tour-tooltip.arrow-left::before {
+    left: -20px;
+    top: 20px;
+    border-right-color: #3498db;
+}
+
+.tour-tooltip.arrow-right::before {
+    right: -20px;
+    top: 20px;
+    border-left-color: #3498db;
+}
+
+/* 开始向导按钮 */
+.tour-start-btn {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 50px;
+    height: 50px;
+    background: linear-gradient(135deg, #3498db, #2980b9);
+    border: none;
+    border-radius: 50%;
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(52, 152, 219, 0.4);
+    z-index: 1000;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tour-start-btn:hover {
+    transform: scale(1.1);
+    box-shadow: 0 6px 20px rgba(52, 152, 219, 0.6);
+}
+
+.tour-start-btn.hidden {
+    display: none;
+}
