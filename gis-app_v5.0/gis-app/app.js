@@ -6791,7 +6791,7 @@
             console.log('[环境检测] 当前部署在GitHub Pages');
             // 延迟显示提示，让用户先看到地图
             setTimeout(function() {
-                showMessage('💡 提示：GitHub Pages在国内访问可能较慢，如遇卡顿请耐心等待', 'info');
+                showMessage('💡 提示：工具访问如遇卡顿请耐心等待', 'info');
             }, 2000);
         }
         
