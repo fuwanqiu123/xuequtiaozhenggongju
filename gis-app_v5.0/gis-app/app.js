@@ -26,6 +26,119 @@
         MAX_HOVER_REQUESTS: 5
     };
     
+    // ========== 页面加载进度管理器 ==========
+    const LoadingManager = {
+        progress: 0,
+        stages: {
+            'dom': { weight: 10, name: '初始化页面' },
+            'ol': { weight: 30, name: '加载地图引擎' },
+            'jquery': { weight: 10, name: '加载工具库' },
+            'map': { weight: 30, name: '初始化地图' },
+            'data': { weight: 10, name: '加载数据' },
+            'complete': { weight: 10, name: '准备就绪' }
+        },
+        completedStages: new Set(),
+        
+        // 更新进度
+        update(stage, percent = 100) {
+            if (this.completedStages.has(stage)) return;
+            
+            const stageInfo = this.stages[stage];
+            if (!stageInfo) return;
+            
+            // 计算该阶段贡献的进度
+            const stageProgress = (stageInfo.weight * percent) / 100;
+            
+            // 计算总进度
+            let totalProgress = 0;
+            this.completedStages.forEach(s => {
+                totalProgress += this.stages[s].weight;
+            });
+            totalProgress += stageProgress;
+            
+            this.progress = Math.min(Math.round(totalProgress), 100);
+            this.updateUI(stageInfo.name);
+            
+            if (percent >= 100) {
+                this.completedStages.add(stage);
+            }
+            
+            // 如果全部完成，隐藏加载器
+            if (this.progress >= 100) {
+                setTimeout(() => this.hide(), 500);
+            }
+        },
+        
+        // 更新UI
+        updateUI(statusText) {
+            const fill = document.getElementById('progressFill');
+            const percent = document.getElementById('progressPercent');
+            const status = document.getElementById('loaderStatus');
+            
+            if (fill) fill.style.width = this.progress + '%';
+            if (percent) percent.textContent = this.progress + '%';
+            if (status && statusText) status.textContent = statusText + '...';
+            
+            console.log(`[加载进度] ${this.progress}% - ${statusText}`);
+        },
+        
+        // 隐藏加载器
+        hide() {
+            const loader = document.getElementById('pageLoader');
+            if (loader) {
+                loader.classList.add('success');
+                setTimeout(() => {
+                    loader.classList.add('hidden');
+                    // 完全移除DOM
+                    setTimeout(() => {
+                        if (loader.parentNode) {
+                            loader.parentNode.removeChild(loader);
+                        }
+                    }, 600);
+                }, 300);
+            }
+        },
+        
+        // 显示错误
+        showError(message) {
+            const status = document.getElementById('loaderStatus');
+            const tips = document.getElementById('loaderTips');
+            
+            if (status) {
+                status.innerHTML = `<i class="fas fa-exclamation-triangle" style="color:#ff6b6b;"></i> ${message}`;
+                status.style.color = '#ff6b6b';
+            }
+            if (tips) {
+                tips.innerHTML = '<i class="fas fa-sync-alt"></i> 请刷新页面重试，或检查网络连接';
+                tips.style.animation = 'none';
+            }
+        },
+        
+        // 模拟进度增长（用于等待外部资源）
+        simulateProgress(targetProgress, duration = 1000) {
+            const startProgress = this.progress;
+            const startTime = Date.now();
+            
+            const animate = () => {
+                const elapsed = Date.now() - startTime;
+                const ratio = Math.min(elapsed / duration, 1);
+                const currentProgress = startProgress + (targetProgress - startProgress) * ratio;
+                
+                this.progress = Math.round(currentProgress);
+                const fill = document.getElementById('progressFill');
+                const percent = document.getElementById('progressPercent');
+                if (fill) fill.style.width = this.progress + '%';
+                if (percent) percent.textContent = this.progress + '%';
+                
+                if (ratio < 1) {
+                    requestAnimationFrame(animate);
+                }
+            };
+            
+            requestAnimationFrame(animate);
+        }
+    };
+    
     // ========== 天地图KEY轮换管理器 ==========
     const TiandituKeyManager = {
         keys: [...CONFIG.TIANDITU_KEYS],
@@ -1858,17 +1971,27 @@
                 searchLayer: searchLayer
             };
             
+            // 更新加载进度 - 图层创建完成
+            LoadingManager.update('map', 60);
+            
             // 初始化交互
             initInteractions();
             
+            // 更新加载进度 - 交互初始化完成
+            LoadingManager.update('map', 80);
+            
             // 添加鼠标悬停显示地址功能
             initMouseHoverHandler();
+            
+            // 地图初始化完成
+            LoadingManager.update('map', 100);
             
             console.log('地图初始化完成');
             showMessage('地图加载成功！', 'success');
             
         } catch (error) {
             console.error('地图初始化失败:', error);
+            LoadingManager.showError('地图初始化失败: ' + error.message);
             showMessage('地图初始化失败: ' + error.message, 'error');
         }
     }
@@ -6611,35 +6734,66 @@
     function initApp() {
         console.log('初始化GIS应用...');
         
+        // 标记DOM加载完成
+        LoadingManager.update('dom', 100);
+        
+        // 检查OpenLayers
         if (typeof ol === 'undefined') {
+            LoadingManager.showError('地图引擎加载失败');
             showMessage('OpenLayers未加载', 'error');
             return;
         }
+        LoadingManager.update('ol', 100);
         
+        // 检查jQuery
         if (typeof $ === 'undefined') {
+            LoadingManager.showError('工具库加载失败');
             showMessage('jQuery未加载', 'error');
             return;
         }
+        LoadingManager.update('jquery', 100);
         
-        initMap();
+        // 初始化地图
+        try {
+            initMap();
+            LoadingManager.update('map', 80);
+        } catch (error) {
+            console.error('地图初始化失败:', error);
+            LoadingManager.showError('地图初始化失败: ' + error.message);
+            return;
+        }
+        
+        // 绑定事件
         bindEvents();
         
-        // 创建默认的JSON文件（学区）
-        createNewJSONFile(generateDefaultFileName());
+        // 创建默认数据
+        try {
+            createNewJSONFile(generateDefaultFileName());
+            createDefaultAssistLayer();
+            LoadingManager.update('data', 100);
+        } catch (error) {
+            console.warn('创建默认数据失败:', error);
+        }
         
-        // 创建默认的辅助元素图层
-        createDefaultAssistLayer();
-        
-        // 初始化图层控制按钮状态
+        // 初始化UI状态
         updateLayerToggleButton();
-        
-        // 初始化KEY状态显示
         updateKeyStatusDisplay();
-        
         updateStatus();
+        
+        // 标记完成
+        LoadingManager.update('complete', 100);
         
         console.log('GIS应用初始化完成');
         showMessage('GIS应用已就绪！已创建默认文件', 'success');
+        
+        // 检测是否为GitHub Pages环境，如果是则提示可能的加载慢问题
+        if (window.location.hostname.includes('github.io')) {
+            console.log('[环境检测] 当前部署在GitHub Pages');
+            // 延迟显示提示，让用户先看到地图
+            setTimeout(function() {
+                showMessage('💡 提示：GitHub Pages在国内访问可能较慢，如遇卡顿请耐心等待', 'info');
+            }, 2000);
+        }
         
         // 检查是否需要显示向导（首次访问）
         initTourGuide();
@@ -6647,10 +6801,27 @@
     
     // 启动应用
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initApp);
+        document.addEventListener('DOMContentLoaded', function() {
+            // 启动模拟进度，让用户看到进度条在动
+            LoadingManager.simulateProgress(30, 2000);
+            initApp();
+        });
     } else {
+        // 如果DOM已加载，仍然启动模拟进度
+        LoadingManager.simulateProgress(30, 2000);
         initApp();
     }
+    
+    // 设置超时保护 - 如果30秒后还在加载，显示提示
+    setTimeout(function() {
+        if (LoadingManager.progress < 100) {
+            const tips = document.getElementById('loaderTips');
+            if (tips) {
+                tips.innerHTML = '<i class="fas fa-exclamation-circle"></i> 加载时间较长，可能是网络较慢，请继续等待...';
+                tips.style.color = '#ffc107';
+            }
+        }
+    }, 30000);
     
     // ========== 用户向导功能 ==========
     

@@ -7,10 +7,72 @@
     <link rel="stylesheet" href="lib/ol.css">
     <link rel="stylesheet" href="fontawesome.min.css">
     <link rel="stylesheet" href="style.css">
-    <script src="lib/ol.js"></script>
-    <script src="lib/jquery.min.js"></script>
+    <script src="lib/ol.js" onerror="window.resourceLoadError && window.resourceLoadError('OpenLayers')"></script>
+    <script src="lib/jquery.min.js" onerror="window.resourceLoadError && window.resourceLoadError('jQuery')"></script>
+    <script>
+        // 资源加载错误处理
+        window.resourceLoadError = function(resourceName) {
+            console.error('[资源加载失败] ' + resourceName);
+            var loader = document.getElementById('pageLoader');
+            var status = document.getElementById('loaderStatus');
+            var tips = document.getElementById('loaderTips');
+            
+            if (status) {
+                status.innerHTML = '<i class="fas fa-exclamation-triangle" style="color:#ff6b6b;"></i> ' + resourceName + ' 加载失败';
+                status.style.color = '#ff6b6b';
+            }
+            if (tips) {
+                tips.innerHTML = '<i class="fas fa-sync-alt"></i> 请检查网络连接后刷新页面重试';
+                tips.style.color = '#ff6b6b';
+                tips.style.animation = 'none';
+            }
+            if (loader) {
+                loader.style.background = 'linear-gradient(135deg, #4a1c1c 0%, #721c24 100%)';
+            }
+        };
+        
+        // 全局错误处理
+        window.onerror = function(msg, url, line) {
+            console.error('[全局错误]', msg, url, line);
+            if (msg && (msg.includes('ol') || msg.includes('OpenLayers'))) {
+                window.resourceLoadError('地图引擎');
+            } else if (msg && msg.includes('$') || msg.includes('jQuery')) {
+                window.resourceLoadError('工具库');
+            }
+            return false;
+        };
+    </script>
 </head>
 <body>
+    <!-- 页面加载进度条 -->
+    <div id="pageLoader" class="page-loader">
+        <div class="loader-content">
+            <div class="loader-spinner">
+                <div class="spinner-ring"></div>
+                <div class="spinner-ring"></div>
+                <div class="spinner-ring"></div>
+            </div>
+            <div class="loader-text">
+                <h3><i class="fas fa-map-marked-alt"></i> 学区绘制工具</h3>
+                <p id="loaderStatus">正在加载资源...</p>
+            </div>
+            <div class="loader-progress">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill" style="width: 5%;"></div>
+                </div>
+                <span class="progress-percent" id="progressPercent">5%</span>
+            </div>
+            <div class="loader-tips" id="loaderTips">
+                <i class="fas fa-info-circle"></i> 首次加载可能需要一些时间，请耐心等待...
+            </div>
+            <noscript>
+                <div style="color: #ff6b6b; margin-top: 15px; padding: 10px; background: rgba(255,0,0,0.1); border-radius: 6px;">
+                    <i class="fas fa-exclamation-triangle"></i> 您的浏览器禁用了JavaScript，无法使用本工具。
+                </div>
+            </noscript>
+        </div>
+    </div>
+    
     <!-- 标题栏 -->
     <div class="header">
         <div>
