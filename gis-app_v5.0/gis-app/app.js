@@ -5,13 +5,18 @@
     
     // 配置
     const CONFIG = {
-        TIANDITU_KEY: 'f14e4bb40aa997803b046bcfbbd7aaa4',//coco
-		//TIANDITU_KEY: '8fd8de7a161f3164a6da3f6615ecb386',//coco
-		//TIANDITU_KEY: 'e495b48f1c8eb41d17dd7f8a5bd47c18',
-		//TIANDITU_KEY: '98ef794563cdf1d71e1411fd28091b0b',
-		//TIANDITU_KEY: '4c2d0fc4e36cfd9d255aa3ca61567c7b',
-		//TIANDITU_KEY: '1b9f5b539a57891fa8419423adf9e010',
-		//TIANDITU_KEY: '20d9014ee072f032fc7d7fee8da01e21',
+        // 天地图KEY列表 - 支持多KEY轮换
+        TIANDITU_KEYS: [
+            'f14e4bb40aa997803b046bcfbbd7aaa4',
+            '8fd8de7a161f3164a6da3f6615ecb386',
+			'a7097827e4299ac41d3d50b45da1c193',
+			'f0c0b3fbe98a7dcc92661e345f17e8ff',
+            'e495b48f1c8eb41d17dd7f8a5bd47c18',
+            '98ef794563cdf1d71e1411fd28091b0b',
+            '4c2d0fc4e36cfd9d255aa3ca61567c7b',
+            '1b9f5b539a57891fa8419423adf9e010',
+            '20d9014ee072f032fc7d7fee8da01e21'
+        ],
         INITIAL_CENTER: [112.91, 27.88],
         INITIAL_ZOOM: 12,
         GEOCODER_API: 'https://api.tianditu.gov.cn/geocoder',
@@ -19,6 +24,112 @@
         POI_SEARCH_API: 'https://api.tianditu.gov.cn/v2/search',
         HOVER_DELAY: 700,
         MAX_HOVER_REQUESTS: 5
+    };
+    
+    // ========== 天地图KEY轮换管理器 ==========
+    const TiandituKeyManager = {
+        keys: [...CONFIG.TIANDITU_KEYS],
+        currentIndex: 0,
+        failedKeys: new Set(),
+        keyUsageCount: {},
+        maxUsagePerKey: 4900, // 每个KEY的安全使用上限（天地图日限5000，预留100次余量）
+        
+        // 获取当前可用的KEY
+        getCurrentKey() {
+            return this.keys[this.currentIndex];
+        },
+        
+        // 获取下一个可用的KEY
+        getNextKey() {
+            // 标记当前KEY为失败
+            this.failedKeys.add(this.currentIndex);
+            
+            // 寻找下一个未失败的KEY
+            let attempts = 0;
+            while (attempts < this.keys.length) {
+                this.currentIndex = (this.currentIndex + 1) % this.keys.length;
+                if (!this.failedKeys.has(this.currentIndex)) {
+                    const newKey = this.keys[this.currentIndex];
+                    console.log(`[KEY轮换] 切换到新KEY (索引${this.currentIndex}): ${newKey.substring(0, 8)}...`);
+                    showMessage(`已自动切换到备用KEY ${this.currentIndex + 1}/${this.keys.length}`, 'info');
+                    return newKey;
+                }
+                attempts++;
+            }
+            
+            // 所有KEY都失败了，重置并返回第一个
+            console.warn('[KEY轮换] 所有KEY都已用完，重置状态');
+            this.failedKeys.clear();
+            this.currentIndex = 0;
+            showMessage('警告：所有天地图KEY已用完，请明天再试或添加新KEY', 'warning');
+            return this.keys[0];
+        },
+        
+        // 记录KEY使用
+        recordUsage(key) {
+            if (!this.keyUsageCount[key]) {
+                this.keyUsageCount[key] = 0;
+            }
+            this.keyUsageCount[key]++;
+            
+            // 如果接近上限，自动切换到下一个
+            if (this.keyUsageCount[key] >= this.maxUsagePerKey) {
+                console.log(`[KEY轮换] KEY ${key.substring(0, 8)}... 已使用 ${this.keyUsageCount[key]} 次，接近上限`);
+                return this.getNextKey();
+            }
+            return key;
+        },
+        
+        // 添加新KEY
+        addKey(newKey) {
+            if (!newKey || newKey.length < 10) {
+                return { success: false, message: '无效的KEY格式' };
+            }
+            if (this.keys.includes(newKey)) {
+                return { success: false, message: '该KEY已存在' };
+            }
+            this.keys.push(newKey);
+            console.log('[KEY轮换] 添加新KEY成功，当前共有', this.keys.length, '个KEY');
+            return { success: true, message: '添加成功' };
+        },
+        
+        // 删除KEY
+        removeKey(index) {
+            if (index < 0 || index >= this.keys.length) {
+                return { success: false, message: '无效的索引' };
+            }
+            if (this.keys.length <= 1) {
+                return { success: false, message: '至少需要保留一个KEY' };
+            }
+            const removed = this.keys.splice(index, 1)[0];
+            // 调整当前索引
+            if (this.currentIndex >= this.keys.length) {
+                this.currentIndex = 0;
+            }
+            // 重新构建失败集合
+            this.failedKeys.clear();
+            console.log('[KEY轮换] 删除KEY成功，当前剩余', this.keys.length, '个KEY');
+            return { success: true, message: '删除成功' };
+        },
+        
+        // 获取状态信息
+        getStatus() {
+            return {
+                totalKeys: this.keys.length,
+                currentIndex: this.currentIndex,
+                currentKey: this.getCurrentKey().substring(0, 8) + '...',
+                failedCount: this.failedKeys.size,
+                usageStats: this.keyUsageCount
+            };
+        },
+        
+        // 重置所有状态
+        reset() {
+            this.currentIndex = 0;
+            this.failedKeys.clear();
+            this.keyUsageCount = {};
+            console.log('[KEY轮换] 状态已重置');
+        }
     };
     
     // 应用状态
@@ -1296,7 +1407,7 @@
             // 天地图图层 - 矢量地图
             const vecLayer = new ol.layer.Tile({
                 source: new ol.source.XYZ({
-                    url: `https://t0.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${CONFIG.TIANDITU_KEY}`,
+                    url: `https://t0.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TiandituKeyManager.getCurrentKey()}`,
                     attributions: '© 天地图'
                 }),
                 visible: true
@@ -1304,7 +1415,7 @@
             
             const cvaLayer = new ol.layer.Tile({
                 source: new ol.source.XYZ({
-                    url: `https://t0.tianditu.gov.cn/cva_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cva&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${CONFIG.TIANDITU_KEY}`,
+                    url: `https://t0.tianditu.gov.cn/cva_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cva&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TiandituKeyManager.getCurrentKey()}`,
                     attributions: '© 天地图'
                 }),
                 visible: true
@@ -1313,7 +1424,7 @@
             // 天地图图层 - 影像地图（卫星图）
             const imgLayer = new ol.layer.Tile({
                 source: new ol.source.XYZ({
-                    url: `https://t0.tianditu.gov.cn/img_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${CONFIG.TIANDITU_KEY}`,
+                    url: `https://t0.tianditu.gov.cn/img_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TiandituKeyManager.getCurrentKey()}`,
                     attributions: '© 天地图'
                 }),
                 visible: false,  // 默认不显示
@@ -1323,7 +1434,7 @@
             // 天地图影像注记图层
             const ciaLayer = new ol.layer.Tile({
                 source: new ol.source.XYZ({
-                    url: `https://t0.tianditu.gov.cn/cia_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cia&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${CONFIG.TIANDITU_KEY}`,
+                    url: `https://t0.tianditu.gov.cn/cia_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cia&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TiandituKeyManager.getCurrentKey()}`,
                     attributions: '© 天地图'
                 }),
                 visible: false,  // 默认不显示，跟随影像图层
@@ -1815,64 +1926,91 @@
     }
     
     function reverseGeocodeForHover(lon, lat, container) {
-        const params = {
-            postStr: JSON.stringify({
-                lon: lon.toFixed(6),
-                lat: lat.toFixed(6),
-                ver: '1'
-            }),
-            type: 'geocode',
-            tk: CONFIG.TIANDITU_KEY
+        let currentKey = TiandituKeyManager.getCurrentKey();
+        
+        const makeRequest = (key) => {
+            const params = {
+                postStr: JSON.stringify({
+                    lon: lon.toFixed(6),
+                    lat: lat.toFixed(6),
+                    ver: '1'
+                }),
+                type: 'geocode',
+                tk: key
+            };
+            
+            const queryString = Object.keys(params)
+                .map(key => `${key}=${encodeURIComponent(params[key])}`)
+                .join('&');
+            
+            return fetch(`${CONFIG.REVERSE_GEOCODER_API}?${queryString}`)
+                .then(response => response.json());
         };
         
-        const queryString = Object.keys(params)
-            .map(key => `${key}=${encodeURIComponent(params[key])}`)
-            .join('&');
-        
-        const url = `${CONFIG.REVERSE_GEOCODER_API}?${queryString}`;
-        
-        fetch(url)
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === "0" && data.result) {
-                    const address = data.result.formatted_address || '未知地址';
-                    const location = data.result.location || {};
+        const tryRequest = (attempt = 0) => {
+            makeRequest(currentKey)
+                .then(data => {
+                    // 检查是否因配额超限失败
+                    if (data.status && (data.status === '7' || data.status === '100' || 
+                        (data.msg && (data.msg.includes('limit') || data.msg.includes('配额'))))) {
+                        if (attempt < TiandituKeyManager.keys.length - 1) {
+                            console.warn(`[KEY轮换] 反向地理编码KEY超限，尝试下一个`);
+                            currentKey = TiandituKeyManager.getNextKey();
+                            tryRequest(attempt + 1);
+                            return;
+                        }
+                    }
                     
-                    let addressText = address;
-                    if (location.district) {
-                        addressText = location.district + (location.street ? location.street : '');
+                    if (data.status === "0" && data.result) {
+                        const address = data.result.formatted_address || '未知地址';
+                        const location = data.result.location || {};
+                        
+                        let addressText = address;
+                        if (location.district) {
+                            addressText = location.district + (location.street ? location.street : '');
+                        }
+                        
+                        container.html(`
+                            <div style="font-weight:bold;margin-bottom:3px;color:#3498db;">鼠标位置</div>
+                            <div style="margin-bottom:2px;"><strong>坐标:</strong> ${lon.toFixed(6)}, ${lat.toFixed(6)}</div>
+                            <div style="margin-bottom:2px;"><strong>地址:</strong> ${addressText}</div>
+                        `);
+                    } else {
+                        container.html(`
+                            <div style="font-weight:bold;margin-bottom:3px;color:#3498db;">鼠标位置</div>
+                            <div style="margin-bottom:2px;"><strong>坐标:</strong> ${lon.toFixed(6)}, ${lat.toFixed(6)}</div>
+                        `);
+                    }
+                    
+                    setTimeout(function() {
+                        if (AppState.hoverRequestCount > 0) {
+                            AppState.hoverRequestCount--;
+                        }
+                    }, 5000);
+                })
+                .catch(error => {
+                    console.error('[反向地理编码] 请求失败:', error);
+                    // 尝试下一个KEY
+                    if (attempt < TiandituKeyManager.keys.length - 1) {
+                        currentKey = TiandituKeyManager.getNextKey();
+                        tryRequest(attempt + 1);
+                        return;
                     }
                     
                     container.html(`
                         <div style="font-weight:bold;margin-bottom:3px;color:#3498db;">鼠标位置</div>
                         <div style="margin-bottom:2px;"><strong>坐标:</strong> ${lon.toFixed(6)}, ${lat.toFixed(6)}</div>
-                        <div style="margin-bottom:2px;"><strong>地址:</strong> ${addressText}</div>
                     `);
-                } else {
-                    container.html(`
-                        <div style="font-weight:bold;margin-bottom:3px;color:#3498db;">鼠标位置</div>
-                        <div style="margin-bottom:2px;"><strong>坐标:</strong> ${lon.toFixed(6)}, ${lat.toFixed(6)}</div>
-                    `);
-                }
-                
-                setTimeout(function() {
-                    if (AppState.hoverRequestCount > 0) {
-                        AppState.hoverRequestCount--;
-                    }
-                }, 5000);
-            })
-            .catch(error => {
-                container.html(`
-                    <div style="font-weight:bold;margin-bottom:3px;color:#3498db;">鼠标位置</div>
-                    <div style="margin-bottom:2px;"><strong>坐标:</strong> ${lon.toFixed(6)}, ${lat.toFixed(6)}</div>
-                `);
-                
-                setTimeout(function() {
-                    if (AppState.hoverRequestCount > 0) {
-                        AppState.hoverRequestCount--;
-                    }
-                }, 5000);
-            });
+                    
+                    setTimeout(function() {
+                        if (AppState.hoverRequestCount > 0) {
+                            AppState.hoverRequestCount--;
+                        }
+                    }, 5000);
+                });
+        };
+        
+        tryRequest();
     }
     
     // ========== 交互初始化 ==========
@@ -5035,45 +5173,62 @@
         searchSource.clear();
         AppState.searchResults = [];
         
-        const searchParams = {
-            query: query,
-            type: 'query',
-            postStr: JSON.stringify({
-                keyWord: query,
-                level: 11,
-                mapBound: '112,27,113,28',
-                queryType: 1,
-                count: 20,
-                start: 0
-            }),
-            tk: CONFIG.TIANDITU_KEY
+        let currentKey = TiandituKeyManager.getCurrentKey();
+        
+        const makeSearchRequest = (key) => {
+            const searchParams = {
+                query: query,
+                type: 'query',
+                postStr: JSON.stringify({
+                    keyWord: query,
+                    level: 11,
+                    mapBound: '112,27,113,28',
+                    queryType: 1,
+                    count: 20,
+                    start: 0
+                }),
+                tk: key
+            };
+            
+            const queryString = Object.keys(searchParams)
+                .map(key => `${key}=${encodeURIComponent(searchParams[key])}`)
+                .join('&');
+            
+            return fetch(`${CONFIG.POI_SEARCH_API}?${queryString}`)
+                .then(response => response.json());
         };
         
-        const queryString = Object.keys(searchParams)
-            .map(key => `${key}=${encodeURIComponent(searchParams[key])}`)
-            .join('&');
-        
-        const requestUrl = `${CONFIG.POI_SEARCH_API}?${queryString}`;
-        
-        fetch(requestUrl)
-            .then(response => response.json())
-            .then(data => {
-                if (data.status.infocode !== 1000) {
-                    $('#searchResults').html(`<div class="search-result-item">API错误</div>`);
-                    showMessage('搜索失败', 'error');
-                    return;
-                }
-                
-                let pois = [];
-                if (data.pois && Array.isArray(data.pois)) {
-                    pois = data.pois;
-                }
-                
-                if (pois.length === 0) {
-                    $('#searchResults').html('<div class="search-result-item">未找到相关结果</div>');
-                    showMessage(`未找到与"${query}"相关的结果`, 'warning');
-                    return;
-                }
+        const trySearch = (attempt = 0) => {
+            makeSearchRequest(currentKey)
+                .then(data => {
+                    // 检查是否因配额超限失败
+                    if (data.status && (data.status === '7' || data.status === '100' || 
+                        data.status.infocode === '10004' || data.status.infocode === '10002' ||
+                        (data.msg && (data.msg.includes('limit') || data.msg.includes('配额'))))) {
+                        if (attempt < TiandituKeyManager.keys.length - 1) {
+                            console.warn(`[KEY轮换] 搜索API KEY超限，尝试下一个`);
+                            currentKey = TiandituKeyManager.getNextKey();
+                            trySearch(attempt + 1);
+                            return;
+                        }
+                    }
+                    
+                    if (data.status && data.status.infocode !== 1000) {
+                        $('#searchResults').html(`<div class="search-result-item">API错误: ${data.status.info}</div>`);
+                        showMessage('搜索失败: ' + (data.status.info || '未知错误'), 'error');
+                        return;
+                    }
+                    
+                    let pois = [];
+                    if (data.pois && Array.isArray(data.pois)) {
+                        pois = data.pois;
+                    }
+                    
+                    if (pois.length === 0) {
+                        $('#searchResults').html('<div class="search-result-item">未找到相关结果</div>');
+                        showMessage(`未找到与"${query}"相关的结果`, 'warning');
+                        return;
+                    }
                 
                 AppState.searchResults = pois;
                 
@@ -5122,16 +5277,26 @@
                     }, 500);
                 }
                 
-                showMessage(`找到 ${pois.length} 个结果`, 'success');
-            })
-            .catch(error => {
-                console.error('搜索失败:', error);
-                $('#searchResults').html(`<div class="search-result-item">搜索失败</div>`);
-                showMessage('搜索失败', 'error');
-            })
-            .finally(() => {
-                $('#searchBtn').html('<i class="fas fa-search"></i>');
-            });
+                    showMessage(`找到 ${pois.length} 个结果`, 'success');
+                })
+                .catch(error => {
+                    console.error('[搜索] 请求失败:', error);
+                    // 尝试下一个KEY
+                    if (attempt < TiandituKeyManager.keys.length - 1) {
+                        currentKey = TiandituKeyManager.getNextKey();
+                        trySearch(attempt + 1);
+                        return;
+                    }
+                    
+                    $('#searchResults').html(`<div class="search-result-item">搜索失败: ${error.message}</div>`);
+                    showMessage('搜索失败: ' + error.message, 'error');
+                })
+                .finally(() => {
+                    $('#searchBtn').html('<i class="fas fa-search"></i>');
+                });
+        };
+        
+        trySearch();
     }
     
     function zoomToSearchResult(index) {
@@ -6143,7 +6308,202 @@
             }
         });
         
+        // ========== 天地图KEY管理事件 ==========
+        // KEY管理器展开/收起
+        $('#keyManagerToggle').on('click', function() {
+            const $content = $('#keyManagerContent');
+            const $arrow = $('#keyManagerArrow');
+            if ($content.is(':visible')) {
+                $content.slideUp(200);
+                $arrow.removeClass('fa-chevron-up').addClass('fa-chevron-down');
+            } else {
+                $content.slideDown(200);
+                $arrow.removeClass('fa-chevron-down').addClass('fa-chevron-up');
+                updateKeyStatusDisplay();
+            }
+        });
+        
+        // 刷新KEY状态
+        $('#keyStatusIndicator').on('click', function() {
+            updateKeyStatusDisplay();
+            showMessage('KEY状态已刷新', 'info');
+        });
+        
+        // 添加新KEY
+        $('#addKeyBtn').on('click', showAddKeyModal);
+        
+        // 查看/管理KEY
+        $('#viewKeysBtn').on('click', showKeyManagerModal);
+        
+        // 重置KEY状态
+        $('#resetKeyBtn').on('click', function() {
+            if (confirm('确定要重置所有KEY的使用状态吗？这将清除所有失败标记和计数。')) {
+                TiandituKeyManager.reset();
+                updateKeyStatusDisplay();
+                showMessage('KEY状态已重置', 'success');
+            }
+        });
+        
         console.log('事件绑定完成');
+    }
+    
+    // ========== KEY管理UI函数 ==========
+    
+    // 更新KEY状态显示
+    function updateKeyStatusDisplay() {
+        const status = TiandituKeyManager.getStatus();
+        $('#currentKeyIndex').text(`${status.currentIndex + 1}/${status.totalKeys}`);
+        
+        const $indicator = $('#keyStatusIndicator');
+        if (status.failedCount >= status.totalKeys - 1) {
+            $indicator.removeClass('warning').addClass('error');
+        } else if (status.failedCount > 0) {
+            $indicator.removeClass('error').addClass('warning');
+        } else {
+            $indicator.removeClass('warning error');
+        }
+    }
+    
+    // 显示添加KEY弹窗
+    function showAddKeyModal() {
+        if ($('#addKeyModal').length > 0) {
+            $('#addKeyModal').remove();
+        }
+        
+        const modalHtml = `
+            <div id="addKeyModal" class="modal-overlay">
+                <div class="modal-content" style="max-width: 450px;">
+                    <h3><i class="fas fa-key"></i> 添加天地图KEY</h3>
+                    <p style="color:#666;margin-bottom:15px;font-size:13px;">
+                        请输入新的天地图KEY（32位字符）<br>
+                        <span style="color:#999;font-size:12px;">KEY可以从天地图开发者中心申请</span>
+                    </p>
+                    <input type="text" id="newKeyInput" placeholder="输入32位天地图KEY" maxlength="40" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:13px;">
+                    <div class="modal-buttons">
+                        <button id="confirmAddKey" class="modal-confirm">
+                            <i class="fas fa-check"></i> 添加
+                        </button>
+                        <button id="cancelAddKey" class="modal-cancel">
+                            <i class="fas fa-times"></i> 取消
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        $('body').append(modalHtml);
+        $('#newKeyInput').focus();
+        
+        $('#confirmAddKey').off('click').on('click', function() {
+            const newKey = $('#newKeyInput').val().trim();
+            const result = TiandituKeyManager.addKey(newKey);
+            
+            if (result.success) {
+                $('#addKeyModal').remove();
+                updateKeyStatusDisplay();
+                showMessage(result.message, 'success');
+            } else {
+                alert(result.message);
+                $('#newKeyInput').focus();
+            }
+        });
+        
+        $('#cancelAddKey').off('click').on('click', function() {
+            $('#addKeyModal').remove();
+        });
+        
+        $('#newKeyInput').off('keypress').on('keypress', function(e) {
+            if (e.which === 13) {
+                $('#confirmAddKey').click();
+            }
+        });
+        
+        $('#addKeyModal').off('click').on('click', function(e) {
+            if (e.target.id === 'addKeyModal') {
+                $('#cancelAddKey').click();
+            }
+        });
+    }
+    
+    // 显示KEY管理弹窗
+    function showKeyManagerModal() {
+        if ($('#keyManagerModal').length > 0) {
+            $('#keyManagerModal').remove();
+        }
+        
+        const status = TiandituKeyManager.getStatus();
+        let keyListHtml = '';
+        
+        TiandituKeyManager.keys.forEach((key, index) => {
+            const isCurrent = index === TiandituKeyManager.currentIndex;
+            const isFailed = TiandituKeyManager.failedKeys.has(index);
+            const usageCount = TiandituKeyManager.keyUsageCount[key] || 0;
+            
+            keyListHtml += `
+                <div class="key-list-item ${isCurrent ? 'current' : ''} ${isFailed ? 'failed' : ''}">
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <span style="font-weight:600;color:#6c757d;min-width:25px;">${index + 1}.</span>
+                        <span>${key.substring(0, 12)}...${key.substring(key.length - 4)}</span>
+                        ${isCurrent ? '<span style="background:#2196f3;color:white;padding:2px 8px;border-radius:3px;font-size:11px;">当前</span>' : ''}
+                        ${isFailed ? '<span style="background:#dc3545;color:white;padding:2px 8px;border-radius:3px;font-size:11px;">已用完</span>' : ''}
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <span style="font-size:11px;color:#6c757d;">使用: ${usageCount}</span>
+                        <div class="key-actions-btns">
+                            ${!isCurrent ? `<button class="btn-delete-key" data-index="${index}" title="删除此KEY"><i class="fas fa-trash"></i></button>` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        const modalHtml = `
+            <div id="keyManagerModal" class="modal-overlay">
+                <div class="modal-content" style="max-width: 500px;max-height:80vh;overflow-y:auto;">
+                    <h3><i class="fas fa-list"></i> 天地图KEY管理</h3>
+                    <p style="color:#666;margin-bottom:15px;font-size:13px;">
+                        共 ${status.totalKeys} 个KEY，当前使用第 ${status.currentIndex + 1} 个<br>
+                        <span style="color:#28a745;">●</span> 正常 <span style="color:#ffc107;">●</span> 警告 <span style="color:#dc3545;">●</span> 已用完
+                    </p>
+                    <div style="max-height:300px;overflow-y:auto;margin-bottom:15px;">
+                        ${keyListHtml}
+                    </div>
+                    <div class="modal-buttons">
+                        <button id="closeKeyManager" class="modal-confirm" style="flex:1;">
+                            <i class="fas fa-check"></i> 确定
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        $('body').append(modalHtml);
+        
+        // 删除KEY事件
+        $('.btn-delete-key').on('click', function() {
+            const index = parseInt($(this).data('index'));
+            if (confirm(`确定要删除第 ${index + 1} 个KEY吗？`)) {
+                const result = TiandituKeyManager.removeKey(index);
+                if (result.success) {
+                    showMessage(result.message, 'success');
+                    $('#keyManagerModal').remove();
+                    showKeyManagerModal(); // 重新打开弹窗
+                    updateKeyStatusDisplay();
+                } else {
+                    alert(result.message);
+                }
+            }
+        });
+        
+        $('#closeKeyManager').off('click').on('click', function() {
+            $('#keyManagerModal').remove();
+        });
+        
+        $('#keyManagerModal').off('click').on('click', function(e) {
+            if (e.target.id === 'keyManagerModal') {
+                $('#closeKeyManager').click();
+            }
+        });
     }
     
     // ========== 多边形名称管理 ==========
@@ -6272,6 +6632,9 @@
         
         // 初始化图层控制按钮状态
         updateLayerToggleButton();
+        
+        // 初始化KEY状态显示
+        updateKeyStatusDisplay();
         
         updateStatus();
         

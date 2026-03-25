@@ -68,6 +68,32 @@
                     <p><strong>多边形数量:</strong> <span id="polygonCount">0</span></p>
                 </div>
             </div>
+            
+            <!-- 天地图KEY管理 -->
+            <div class="key-manager-section">
+                <div class="key-manager-header" id="keyManagerToggle">
+                    <span><i class="fas fa-key"></i> 天地图KEY管理</span>
+                    <i class="fas fa-chevron-down" id="keyManagerArrow"></i>
+                </div>
+                <div class="key-manager-content" id="keyManagerContent" style="display: none;">
+                    <div class="key-status">
+                        <span class="key-status-label">当前使用:</span>
+                        <span class="key-status-value" id="currentKeyIndex">1/7</span>
+                        <span class="key-status-indicator" id="keyStatusIndicator" title="点击刷新状态"></span>
+                    </div>
+                    <div class="key-actions">
+                        <button id="addKeyBtn" class="btn-key-action" title="添加新KEY">
+                            <i class="fas fa-plus"></i> 添加
+                        </button>
+                        <button id="viewKeysBtn" class="btn-key-action" title="查看/管理KEY">
+                            <i class="fas fa-list"></i> 管理
+                        </button>
+                        <button id="resetKeyBtn" class="btn-key-action" title="重置KEY状态">
+                            <i class="fas fa-redo"></i> 重置
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- 地图容器 -->

@@ -838,6 +838,192 @@ body {
     color: #2c3e50;
 }
 
+/* 天地图KEY管理器 */
+.key-manager-section {
+    padding: 12px 15px;
+    background: #fff;
+    border-bottom: 1px solid #ddd;
+}
+
+.key-manager-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.key-manager-header:hover {
+    opacity: 0.95;
+    transform: translateY(-1px);
+}
+
+.key-manager-header i:first-child {
+    margin-right: 8px;
+}
+
+.key-manager-content {
+    margin-top: 10px;
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    border: 1px solid #e9ecef;
+}
+
+.key-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    background: white;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.key-status-label {
+    color: #6c757d;
+}
+
+.key-status-value {
+    font-weight: 600;
+    color: #495057;
+}
+
+.key-status-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #28a745;
+    margin-left: auto;
+    cursor: pointer;
+    animation: pulse 2s infinite;
+}
+
+.key-status-indicator.warning {
+    background: #ffc107;
+}
+
+.key-status-indicator.error {
+    background: #dc3545;
+    animation: none;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.key-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-key-action {
+    flex: 1;
+    padding: 8px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    transition: all 0.2s;
+    background: #e9ecef;
+    color: #495057;
+}
+
+.btn-key-action:hover {
+    background: #dee2e6;
+    transform: translateY(-1px);
+}
+
+.btn-key-action i {
+    font-size: 10px;
+}
+
+/* KEY管理弹窗样式 */
+.key-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    border-left: 4px solid #28a745;
+}
+
+.key-list-item.current {
+    background: #e3f2fd;
+    border-left-color: #2196f3;
+}
+
+.key-list-item.failed {
+    border-left-color: #dc3545;
+    opacity: 0.7;
+}
+
+.key-list-item span {
+    font-family: monospace;
+    font-size: 12px;
+    color: #495057;
+}
+
+.key-list-item .key-actions-btns {
+    display: flex;
+    gap: 5px;
+}
+
+.key-list-item .key-actions-btns button {
+    padding: 4px 8px;
+    font-size: 11px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.key-list-item .key-actions-btns .btn-delete-key {
+    background: #dc3545;
+    color: white;
+}
+
+.key-list-item .key-actions-btns .btn-delete-key:hover {
+    background: #c82333;
+}
+
+.key-add-form {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #dee2e6;
+}
+
+.key-add-form input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 13px;
+    margin-bottom: 10px;
+    font-family: monospace;
+}
+
+.key-add-form input:focus {
+    border-color: #80bdff;
+    outline: none;
+    box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
+}
+
 /* 操作提示 */
 .instructions {
     padding: 15px;
