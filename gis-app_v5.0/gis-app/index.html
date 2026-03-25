@@ -4,131 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>XX市学区范围绘制工具</title>
-    <!-- 关键CSS内联：确保loading动画立即显示 -->
-    <style>
-        /* 重置样式 */
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        /* 页面加载进度条 - 关键样式内联 */
-        .page-loader {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            z-index: 99999;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        .page-loader.hidden {
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.5s ease, visibility 0.5s ease;
-        }
-        .loader-content {
-            text-align: center;
-            color: white;
-            padding: 40px;
-            max-width: 400px;
-        }
-        .loader-spinner {
-            position: relative;
-            width: 80px;
-            height: 80px;
-            margin: 0 auto 30px;
-        }
-        .spinner-ring {
-            position: absolute;
-            border: 4px solid transparent;
-            border-top-color: rgba(255, 255, 255, 0.9);
-            border-radius: 50%;
-            animation: spin 1.2s linear infinite;
-        }
-        .spinner-ring:nth-child(1) {
-            width: 80px;
-            height: 80px;
-            top: 0;
-            left: 0;
-            animation-duration: 1.2s;
-        }
-        .spinner-ring:nth-child(2) {
-            width: 60px;
-            height: 60px;
-            top: 10px;
-            left: 10px;
-            border-top-color: rgba(255, 255, 255, 0.6);
-            animation-duration: 0.9s;
-            animation-direction: reverse;
-        }
-        .spinner-ring:nth-child(3) {
-            width: 40px;
-            height: 40px;
-            top: 20px;
-            left: 20px;
-            border-top-color: rgba(255, 255, 255, 0.3);
-            animation-duration: 0.6s;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .loader-text h3 {
-            font-size: 24px;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-        .loader-text p {
-            font-size: 14px;
-            opacity: 0.9;
-            margin-bottom: 25px;
-        }
-        .progress-bar {
-            width: 100%;
-            height: 8px;
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 10px;
-            overflow: hidden;
-            margin-bottom: 10px;
-        }
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #00d9ff, #00ff88);
-            border-radius: 10px;
-            width: 5%;
-            transition: width 0.3s ease;
-            box-shadow: 0 0 10px rgba(0, 217, 255, 0.5);
-        }
-        .progress-percent {
-            font-size: 14px;
-            font-weight: 600;
-        }
-        .loader-tips {
-            font-size: 12px;
-            opacity: 0.7;
-            margin-top: 15px;
-            line-height: 1.5;
-            padding: 10px 15px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-            animation: fadeInOut 3s ease-in-out infinite;
-        }
-        @keyframes fadeInOut {
-            0%, 100% { opacity: 0.5; }
-            50% { opacity: 1; }
-        }
-        /* 响应式 */
-        @media (max-width: 480px) {
-            .loader-content { padding: 30px 20px; }
-            .loader-text h3 { font-size: 20px; }
-            .loader-spinner { width: 60px; height: 60px; }
-            .spinner-ring:nth-child(1) { width: 60px; height: 60px; }
-            .spinner-ring:nth-child(2) { width: 45px; height: 45px; top: 7.5px; left: 7.5px; }
-            .spinner-ring:nth-child(3) { width: 30px; height: 30px; top: 15px; left: 15px; }
-        }
-    </style>
     <link rel="stylesheet" href="lib/ol.css">
     <link rel="stylesheet" href="fontawesome.min.css">
     <link rel="stylesheet" href="style.css">
@@ -166,81 +41,6 @@
             }
             return false;
         };
-        
-        // 立即启动进度条动画 - 不等待外部JS
-        (function() {
-            var startTime = Date.now();
-            var progress = 5;
-            var maxProgress = 85; // 最大到85%，留给应用初始化完成最后的15%
-            
-            function updateProgress() {
-                var elapsed = Date.now() - startTime;
-                var fill = document.getElementById('progressFill');
-                var percent = document.getElementById('progressPercent');
-                var status = document.getElementById('loaderStatus');
-                
-                if (!fill) return;
-                
-                // 前5秒快速增长到40%
-                if (elapsed < 5000) {
-                    progress = 5 + (elapsed / 5000) * 35;
-                } 
-                // 5-20秒缓慢增长到70%
-                else if (elapsed < 20000) {
-                    progress = 40 + ((elapsed - 5000) / 15000) * 30;
-                }
-                // 20-30秒缓慢增长到85%
-                else if (elapsed < 30000) {
-                    progress = 70 + ((elapsed - 20000) / 10000) * 15;
-                }
-                else {
-                    progress = Math.min(progress + 0.1, maxProgress);
-                }
-                
-                progress = Math.min(progress, maxProgress);
-                
-                fill.style.width = progress + '%';
-                if (percent) percent.textContent = Math.round(progress) + '%';
-                
-                // 更新状态文字
-                if (status && elapsed > 5000 && elapsed < 10000) {
-                    status.textContent = '正在加载地图引擎...';
-                } else if (status && elapsed > 10000 && elapsed < 20000) {
-                    status.textContent = '正在初始化组件...';
-                } else if (status && elapsed > 20000) {
-                    status.textContent = '网络较慢，请继续等待...';
-                }
-                
-                // 继续更新直到应用接管
-                if (progress < maxProgress) {
-                    requestAnimationFrame(updateProgress);
-                }
-            }
-            
-            // 立即开始更新
-            requestAnimationFrame(updateProgress);
-            
-            // 暴露全局方法供app.js调用完成加载
-            window.completeLoading = function() {
-                var fill = document.getElementById('progressFill');
-                var percent = document.getElementById('progressPercent');
-                var loader = document.getElementById('pageLoader');
-                
-                if (fill) fill.style.width = '100%';
-                if (percent) percent.textContent = '100%';
-                
-                setTimeout(function() {
-                    if (loader) {
-                        loader.classList.add('hidden');
-                        setTimeout(function() {
-                            if (loader.parentNode) {
-                                loader.parentNode.removeChild(loader);
-                            }
-                        }, 600);
-                    }
-                }, 300);
-            };
-        })();
     </script>
 </head>
 <body>
@@ -253,8 +53,8 @@
                 <div class="spinner-ring"></div>
             </div>
             <div class="loader-text">
-                <h3>🏫 学区绘制工具</h3>
-                <p id="loaderStatus">正在连接服务器...</p>
+                <h3><i class="fas fa-map-marked-alt"></i> 学区绘制工具</h3>
+                <p id="loaderStatus">正在加载资源...</p>
             </div>
             <div class="loader-progress">
                 <div class="progress-bar">
@@ -263,12 +63,11 @@
                 <span class="progress-percent" id="progressPercent">5%</span>
             </div>
             <div class="loader-tips" id="loaderTips">
-                <span style="opacity:0.9;">📡 正在从 GitHub Pages 加载资源...</span><br>
-                <span style="font-size:11px;opacity:0.7;">国内访问可能需要 10-30 秒，请耐心等待</span>
+                <i class="fas fa-info-circle"></i> 首次加载可能需要一些时间，请耐心等待...
             </div>
             <noscript>
                 <div style="color: #ff6b6b; margin-top: 15px; padding: 10px; background: rgba(255,0,0,0.1); border-radius: 6px;">
-                    ⚠️ 您的浏览器禁用了JavaScript，无法使用本工具。
+                    <i class="fas fa-exclamation-triangle"></i> 您的浏览器禁用了JavaScript，无法使用本工具。
                 </div>
             </noscript>
         </div>
