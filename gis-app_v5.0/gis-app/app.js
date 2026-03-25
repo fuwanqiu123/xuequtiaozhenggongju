@@ -84,18 +84,20 @@
         
         // 隐藏加载器
         hide() {
-            const loader = document.getElementById('pageLoader');
-            if (loader) {
-                loader.classList.add('success');
-                setTimeout(() => {
+            // 使用全局方法完成加载
+            if (typeof window.completeLoading === 'function') {
+                window.completeLoading();
+            } else {
+                // 备用方案
+                const loader = document.getElementById('pageLoader');
+                if (loader) {
                     loader.classList.add('hidden');
-                    // 完全移除DOM
                     setTimeout(() => {
                         if (loader.parentNode) {
                             loader.parentNode.removeChild(loader);
                         }
                     }, 600);
-                }, 300);
+                }
             }
         },
         
@@ -6801,27 +6803,10 @@
     
     // 启动应用
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() {
-            // 启动模拟进度，让用户看到进度条在动
-            LoadingManager.simulateProgress(30, 2000);
-            initApp();
-        });
+        document.addEventListener('DOMContentLoaded', initApp);
     } else {
-        // 如果DOM已加载，仍然启动模拟进度
-        LoadingManager.simulateProgress(30, 2000);
         initApp();
     }
-    
-    // 设置超时保护 - 如果30秒后还在加载，显示提示
-    setTimeout(function() {
-        if (LoadingManager.progress < 100) {
-            const tips = document.getElementById('loaderTips');
-            if (tips) {
-                tips.innerHTML = '<i class="fas fa-exclamation-circle"></i> 加载时间较长，可能是网络较慢，请继续等待...';
-                tips.style.color = '#ffc107';
-            }
-        }
-    }, 30000);
     
     // ========== 用户向导功能 ==========
     
