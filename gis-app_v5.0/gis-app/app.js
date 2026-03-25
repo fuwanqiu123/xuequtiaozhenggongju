@@ -6786,15 +6786,6 @@
         console.log('GIS应用初始化完成');
         showMessage('GIS应用已就绪！已创建默认文件', 'success');
         
-        // 检测是否为GitHub Pages环境，如果是则提示可能的加载慢问题
-        if (window.location.hostname.includes('github.io')) {
-            console.log('[环境检测] 当前部署在GitHub Pages');
-            // 延迟显示提示，让用户先看到地图
-            setTimeout(function() {
-                showMessage('💡 提示：工具访问如遇卡顿请耐心等待', 'info');
-            }, 2000);
-        }
-        
         // 检查是否需要显示向导（首次访问）
         initTourGuide();
     }
