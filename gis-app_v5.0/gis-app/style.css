@@ -339,6 +339,238 @@ body {
     transform: rotate(180deg);
 }
 
+/* 学区分组管理区域 - 占主要空间 */
+.group-manager-section {
+    flex: 1.2;
+    display: flex;
+    flex-direction: column;
+    background: #f8f9fa;
+    border-bottom: 2px solid #3498db;
+    min-height: 250px;
+    max-height: 70%;
+}
+
+.group-manager-header {
+    background: #34495e;
+    color: white;
+    padding: 12px 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.group-manager-header span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* 分组Tab选项卡样式 */
+.group-tabs {
+    display: flex;
+    background: #ecf0f1;
+    border-bottom: 1px solid #bdc3c7;
+}
+
+.group-tab {
+    flex: 1;
+    padding: 12px 8px;
+    text-align: center;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    color: #7f8c8d;
+    background: #ecf0f1;
+    border-bottom: 3px solid transparent;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    position: relative;
+}
+
+.group-tab:hover {
+    background: #d5dbdb;
+    color: #2c3e50;
+}
+
+.group-tab.active {
+    background: white;
+    color: #3498db;
+    border-bottom-color: #3498db;
+    font-weight: 600;
+}
+
+.group-tab .group-count {
+    background: #bdc3c7;
+    color: white;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 11px;
+    min-width: 18px;
+}
+
+.group-tab.active .group-count {
+    background: #3498db;
+}
+
+/* 全局控制按钮 */
+.global-controls {
+    padding: 10px 15px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.btn-toggle-all-groups {
+    width: 100%;
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.2s;
+}
+
+.btn-toggle-all-groups:hover {
+    background: #5a6268;
+}
+
+.btn-toggle-all-groups.all-hidden {
+    background: #e74c3c;
+}
+
+.btn-toggle-all-groups.all-hidden:hover {
+    background: #c0392b;
+}
+
+/* 分组文件列表容器 */
+.group-file-list-container {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+    min-height: 0;
+}
+
+/* 文件列表内容区域 - 确保可滚动 */
+.group-file-list .jsonFileList {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 100px;
+    max-height: none;
+    background: white;
+}
+
+.group-file-list {
+    display: none;
+    flex-direction: column;
+    height: 100%;
+    background: white;
+}
+
+.group-file-list.active {
+    display: flex;
+}
+
+.group-file-header {
+    background: #3498db;
+    color: white;
+    padding: 10px 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.group-file-header span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* 组级别导入按钮 */
+.btn-import-group {
+    background: #2ecc71;
+    color: white;
+    border: none;
+    padding: 5px 12px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.2s;
+}
+
+.btn-import-group:hover {
+    background: #27ae60;
+    transform: translateY(-1px);
+}
+
+.btn-import-folder-group {
+    background: #9b59b6;
+    color: white;
+    border: none;
+    padding: 5px 12px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.2s;
+}
+
+.btn-import-folder-group:hover {
+    background: #8e44ad;
+    transform: translateY(-1px);
+}
+
+/* 组级别显隐按钮 */
+.btn-toggle-group-visibility {
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.btn-toggle-group-visibility:hover {
+    background: #5a6268;
+}
+
+.btn-toggle-group-visibility.all-hidden {
+    background: #e74c3c;
+}
+
+.btn-toggle-group-visibility.all-hidden:hover {
+    background: #c0392b;
+}
+
 /* JSON文件管理区域 - 占主要空间 */
 .json-manager-section {
     flex: 1.2;
@@ -750,11 +982,13 @@ body {
 }
 
 /* JSON文件列表 - 占据更多空间 */
-.json-file-list {
+.json-file-list,
+.jsonFileList {
     flex: 1;
     overflow-y: auto;
     background: white;
-    min-height: 150px;
+    min-height: 100px;
+    max-height: calc(100% - 120px);
 }
 
 /* 文件隐藏状态 */
@@ -829,6 +1063,31 @@ body {
 @keyframes pulse {
     0%, 100% { background-color: #fff3cd; }
     50% { background-color: #ffeaa7; }
+}
+
+/* 自动定位高亮脉冲效果 */
+.json-file-item.highlight-pulse {
+    animation: highlightPulse 2s ease-in-out;
+    border-left: 4px solid #3498db;
+}
+
+@keyframes highlightPulse {
+    0%, 100% { 
+        background-color: white;
+        box-shadow: none;
+    }
+    25% { 
+        background-color: #d6eaf8;
+        box-shadow: 0 0 10px rgba(52, 152, 219, 0.5);
+    }
+    50% { 
+        background-color: #aed6f1;
+        box-shadow: 0 0 20px rgba(52, 152, 219, 0.8);
+    }
+    75% { 
+        background-color: #d6eaf8;
+        box-shadow: 0 0 10px rgba(52, 152, 219, 0.5);
+    }
 }
 
 .json-file-item.search-match {
@@ -1665,6 +1924,24 @@ body {
 #measureArea.active {
     background: #ff6b6b !important;
     color: white !important;
+}
+
+/* 学区着色按钮样式 */
+#colorDistricts {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-color: #764ba2;
+}
+
+#colorDistricts:hover {
+    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+#colorDistricts.active {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    border-color: #f5576c;
 }
 
 /* 搜索结果面板 */

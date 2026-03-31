@@ -256,12 +256,42 @@
         hoverTimer: null,
         lastHoverCoordinate: null,
         hoverRequestCount: 0,
-        // JSON文件管理
-        jsonFiles: [],
-        selectedJSONFile: null,
-        jsonFeatureMap: new Map(),
-        hiddenFiles: new Set(), // 存储被隐藏的文件ID
-        nextFileId: 1,
+        // 学区分组管理 - 3个组，每组独立管理
+        currentGroup: 1, // 当前选中的组 (1, 2, 3)
+        groups: {
+            1: {
+                id: 1,
+                name: '学区组1',
+                jsonFiles: [],
+                selectedJSONFile: null,
+                jsonFeatureMap: new Map(),
+                hiddenFiles: new Set(),
+                nextFileId: 1,
+                starredFiles: new Set()
+            },
+            2: {
+                id: 2,
+                name: '学区组2',
+                jsonFiles: [],
+                selectedJSONFile: null,
+                jsonFeatureMap: new Map(),
+                hiddenFiles: new Set(),
+                nextFileId: 1,
+                starredFiles: new Set()
+            },
+            3: {
+                id: 3,
+                name: '学区组3',
+                jsonFiles: [],
+                selectedJSONFile: null,
+                jsonFeatureMap: new Map(),
+                hiddenFiles: new Set(),
+                nextFileId: 1,
+                starredFiles: new Set()
+            }
+        },
+        // 全局隐藏状态（用于统一控制所有组）
+        allGroupsHidden: false,
         // 顶点编辑相关
         selectedVertexIndex: null,
         selectedVertexCoordinates: null,
@@ -269,8 +299,6 @@
         selectedAssistFeature: null,
         // 辅助要素显示状态
         assistFeaturesVisible: true,
-        // 标星的学区文件ID列表
-        starredFiles: new Set(),
         // 测量功能状态
         measureMode: null, // 'length' | 'area' | null
         measureFeatures: [],
@@ -290,8 +318,71 @@
         selectedAssistVertexIndex: null,
         selectedAssistVertexCoordinates: null,
         // 地图点击处理器
-        mapClickHandler: null
+        mapClickHandler: null,
+        // 学区着色状态
+        isColored: false,
+        districtColors: new Map(), // 存储每个学区的颜色
+        originalStyles: new Map()  // 存储原始样式以便恢复
     };
+    
+    // 获取当前组的状态
+    function getCurrentGroup() {
+        return AppState.groups[AppState.currentGroup];
+    }
+    
+    // ========== 自动定位到左侧列表中的对应学区文件 ==========
+    function autoLocateFileInList(feature) {
+        const featureFileId = feature.get('sourceFileId');
+        const featureGroupId = feature.get('sourceGroupId');
+        
+        if (!featureFileId || !featureGroupId) {
+            return;
+        }
+        
+        // 如果要素属于不同的组，先切换到那个组
+        if (featureGroupId !== AppState.currentGroup) {
+            switchGroup(featureGroupId);
+        }
+        
+        const group = AppState.groups[featureGroupId];
+        const jsonFile = group.jsonFiles.find(f => f.id === featureFileId);
+        
+        if (!jsonFile) {
+            return;
+        }
+        
+        // 设置当前选中的文件
+        group.selectedJSONFile = jsonFile;
+        
+        // 更新Tab显示
+        updateGroupTabs();
+        
+        // 更新所有要素的样式
+        updateAllFeatureStyles();
+        
+        // 更新文件列表UI，高亮选中的文件
+        const searchTerm = $(`.fileSearchInput[data-group="${featureGroupId}"]`).val();
+        updateJSONFileList(featureGroupId, searchTerm);
+        
+        // 滚动到选中的文件项
+        setTimeout(() => {
+            const $fileItem = $(`.json-file-item[data-json-id="${featureFileId}"]`);
+            if ($fileItem.length) {
+                const $fileList = $(`.jsonFileList[data-group="${featureGroupId}"]`);
+                $fileList.animate({
+                    scrollTop: $fileItem.position().top + $fileList.scrollTop() - 10
+                }, 300);
+                
+                // 添加闪烁效果吸引注意力
+                $fileItem.addClass('highlight-pulse');
+                setTimeout(() => {
+                    $fileItem.removeClass('highlight-pulse');
+                }, 2000);
+            }
+        }, 100);
+        
+        console.log(`自动定位到学区文件: ${jsonFile.name} (组${featureGroupId})`);
+    }
     
     // 全局变量
     let map;
@@ -342,14 +433,27 @@
             modeText = modeMap[AppState.currentMode] || '浏览';
         }
         
+        const currentGroup = getCurrentGroup();
+        
         $('#currentMode').text(modeText);
+        $('#currentGroup').text(currentGroup.name);
         $('#polygonCount').text(vectorSource ? vectorSource.getFeatures().length : 0);
         $('#lineCount').text(lineSource ? lineSource.getFeatures().length : 0);
         $('#assistPolygonCount').text(assistPolygonSource ? assistPolygonSource.getFeatures().length : 0);
         $('#assistTextCount').text(assistTextSource ? assistTextSource.getFeatures().length : 0);
         $('#assistPointCount').text(assistPointSource ? assistPointSource.getFeatures().length : 0);
-        $('#selectedJSON').text(AppState.selectedJSONFile ? AppState.selectedJSONFile.name : '无选中学区');
-        $('#jsonFileCountBadge').text(AppState.jsonFiles.length);
+        $('#selectedJSON').text(currentGroup.selectedJSONFile ? currentGroup.selectedJSONFile.name : '无选中学区');
+        
+        // 更新各组计数
+        let totalCount = 0;
+        [1, 2, 3].forEach(groupId => {
+            const group = AppState.groups[groupId];
+            const count = group.jsonFiles.length;
+            $(`#group${groupId}Count`).text(count);
+            totalCount += count;
+        });
+        $('#totalFileCountBadge').text(totalCount);
+        
         $('#assistFileCountBadge').text(AppState.assistFiles.length);
     }
     
@@ -674,20 +778,23 @@
     
     // ========== JSON文件管理 ==========
     
-    // 更新JSON文件列表显示
-    function updateJSONFileList(searchTerm = '') {
-        const $jsonFileList = $('#jsonFileList');
+    // 更新JSON文件列表显示（支持分组）
+    function updateJSONFileList(groupId = null, searchTerm = '') {
+        // 如果没有指定组，使用当前组
+        const targetGroupId = groupId || AppState.currentGroup;
+        const group = AppState.groups[targetGroupId];
+        const $jsonFileList = $(`.jsonFileList[data-group="${targetGroupId}"]`);
         
-        if (AppState.jsonFiles.length === 0) {
+        if (group.jsonFiles.length === 0) {
             $jsonFileList.html('<div class="no-data">暂无学区文件，请点击"导入"添加文件</div>');
             updateStatus();
             return;
         }
         
         // 对文件列表进行排序：标星的文件排在前面
-        const sortedFiles = [...AppState.jsonFiles].sort((a, b) => {
-            const aStarred = AppState.starredFiles.has(a.id);
-            const bStarred = AppState.starredFiles.has(b.id);
+        const sortedFiles = [...group.jsonFiles].sort((a, b) => {
+            const aStarred = group.starredFiles.has(a.id);
+            const bStarred = group.starredFiles.has(b.id);
             if (aStarred && !bStarred) return -1;
             if (!aStarred && bStarred) return 1;
             return 0;
@@ -697,9 +804,9 @@
         let hasMatch = false;
         
         sortedFiles.forEach(jsonFile => {
-            const isSelected = AppState.selectedJSONFile && AppState.selectedJSONFile.id === jsonFile.id;
-            const isHidden = AppState.hiddenFiles.has(jsonFile.id);
-            const features = AppState.jsonFeatureMap.get(jsonFile.id) || [];
+            const isSelected = group.selectedJSONFile && group.selectedJSONFile.id === jsonFile.id;
+            const isHidden = group.hiddenFiles.has(jsonFile.id);
+            const features = group.jsonFeatureMap.get(jsonFile.id) || [];
             const featureCount = features.length;
             
             // 搜索过滤
@@ -713,10 +820,10 @@
             const highlightClass = (searchTerm && matchesSearch) ? 'search-highlight' : '';
             
             // 检查是否已标星
-            const isStarred = AppState.starredFiles.has(jsonFile.id);
+            const isStarred = group.starredFiles.has(jsonFile.id);
             
             html += `
-                <div class="json-file-item ${isSelected ? 'selected' : ''} ${isHidden ? 'hidden-file' : ''} ${searchClass} ${highlightClass} ${isStarred ? 'starred' : ''}" data-json-id="${jsonFile.id}" data-file-name="${jsonFile.name.toLowerCase()}">
+                <div class="json-file-item ${isSelected ? 'selected' : ''} ${isHidden ? 'hidden-file' : ''} ${searchClass} ${highlightClass} ${isStarred ? 'starred' : ''}" data-json-id="${jsonFile.id}" data-group-id="${targetGroupId}" data-file-name="${jsonFile.name.toLowerCase()}">
                     <div class="json-file-main">
                         <div class="json-file-info">
                             <div class="json-file-name" title="${jsonFile.name}">
@@ -727,16 +834,16 @@
                         <div class="json-file-count">${featureCount}</div>
                     </div>
                     <div class="json-file-actions-row">
-                        <button class="btn-star ${isStarred ? 'starred' : ''}" data-json-id="${jsonFile.id}" title="${isStarred ? '取消标星' : '标星该学区'}">
+                        <button class="btn-star ${isStarred ? 'starred' : ''}" data-json-id="${jsonFile.id}" data-group-id="${targetGroupId}" title="${isStarred ? '取消标星' : '标星该学区'}">
                             <i class="fas ${isStarred ? 'fa-star' : 'fa-star-o'}"></i> ${isStarred ? '已标星' : '标星'}
                         </button>
-                        <button class="btn-visibility ${isHidden ? 'hidden-state' : ''}" data-json-id="${jsonFile.id}" title="${isHidden ? '显示该文件' : '隐藏该文件'}">
+                        <button class="btn-visibility ${isHidden ? 'hidden-state' : ''}" data-json-id="${jsonFile.id}" data-group-id="${targetGroupId}" title="${isHidden ? '显示该文件' : '隐藏该文件'}">
                             <i class="fas ${isHidden ? 'fa-eye-slash' : 'fa-eye'}"></i>
                         </button>
-                        <button class="btn-clear" data-json-id="${jsonFile.id}" title="清除该文件中的所有图形">
+                        <button class="btn-clear" data-json-id="${jsonFile.id}" data-group-id="${targetGroupId}" title="清除该文件中的所有图形">
                             <i class="fas fa-eraser"></i> 清除
                         </button>
-                        <button class="btn-remove" data-json-id="${jsonFile.id}" title="删除该文件及其所有图形">
+                        <button class="btn-remove" data-json-id="${jsonFile.id}" data-group-id="${targetGroupId}" title="删除该文件及其所有图形">
                             <i class="fas fa-trash-alt"></i> 移除
                         </button>
                     </div>
@@ -763,118 +870,201 @@
                 return;
             }
             const jsonId = $(this).data('json-id');
-            selectJSONFile(jsonId);
+            const grpId = $(this).data('group-id');
+            selectJSONFile(jsonId, grpId);
         });
         
         // 绑定标星按钮事件
         $jsonFileList.off('click', '.btn-star').on('click', '.btn-star', function(e) {
             e.stopPropagation();
             const jsonId = $(this).data('json-id');
-            toggleFileStar(jsonId);
+            const grpId = $(this).data('group-id');
+            toggleFileStar(jsonId, grpId);
         });
         
         // 绑定隐藏/显示按钮事件
         $jsonFileList.off('click', '.btn-visibility').on('click', '.btn-visibility', function(e) {
             e.stopPropagation();
             const jsonId = $(this).data('json-id');
-            toggleFileVisibility(jsonId);
+            const grpId = $(this).data('group-id');
+            toggleFileVisibility(jsonId, grpId);
         });
         
         // 绑定清除按钮事件
         $jsonFileList.off('click', '.btn-clear').on('click', '.btn-clear', function(e) {
             e.stopPropagation();
             const jsonId = $(this).data('json-id');
-            clearJSONFile(jsonId);
+            const grpId = $(this).data('group-id');
+            clearJSONFile(jsonId, grpId);
         });
         
         // 绑定移除按钮事件
         $jsonFileList.off('click', '.btn-remove').on('click', '.btn-remove', function(e) {
             e.stopPropagation();
             const jsonId = $(this).data('json-id');
-            removeJSONFile(jsonId);
+            const grpId = $(this).data('group-id');
+            removeJSONFile(jsonId, grpId);
         });
         
         updateStatus();
     }
     
     // 切换文件标星状态
-    function toggleFileStar(jsonId) {
-        const jsonFile = AppState.jsonFiles.find(f => f.id === jsonId);
+    function toggleFileStar(jsonId, groupId = null) {
+        const grpId = groupId || AppState.currentGroup;
+        const group = AppState.groups[grpId];
+        const jsonFile = group.jsonFiles.find(f => f.id === jsonId);
         if (!jsonFile) return;
         
-        if (AppState.starredFiles.has(jsonId)) {
-            AppState.starredFiles.delete(jsonId);
+        if (group.starredFiles.has(jsonId)) {
+            group.starredFiles.delete(jsonId);
             showMessage(`已取消标星: ${jsonFile.name}`, 'info');
         } else {
-            AppState.starredFiles.add(jsonId);
+            group.starredFiles.add(jsonId);
             showMessage(`已标星学区: ${jsonFile.name}`, 'success');
         }
         
         // 更新文件列表显示（会重新排序）
-        updateJSONFileList($('#fileSearchInput').val());
+        const searchTerm = $(`.fileSearchInput[data-group="${grpId}"]`).val();
+        updateJSONFileList(grpId, searchTerm);
     }
     
     // 切换文件可见性
-    function toggleFileVisibility(jsonId) {
-        if (AppState.hiddenFiles.has(jsonId)) {
-            AppState.hiddenFiles.delete(jsonId);
-            console.log(`显示文件: ${jsonId}`);
+    function toggleFileVisibility(jsonId, groupId = null) {
+        const grpId = groupId || AppState.currentGroup;
+        const group = AppState.groups[grpId];
+        
+        if (group.hiddenFiles.has(jsonId)) {
+            group.hiddenFiles.delete(jsonId);
+            console.log(`显示文件: ${jsonId} (组${grpId})`);
         } else {
-            AppState.hiddenFiles.add(jsonId);
-            console.log(`隐藏文件: ${jsonId}`);
+            group.hiddenFiles.add(jsonId);
+            console.log(`隐藏文件: ${jsonId} (组${grpId})`);
         }
         
         // 刷新地图显示
         vectorSource.changed();
         
         // 更新文件列表显示
-        updateJSONFileList($('#fileSearchInput').val());
+        const searchTerm = $(`.fileSearchInput[data-group="${grpId}"]`).val();
+        updateJSONFileList(grpId, searchTerm);
         
-        // 更新全部隐藏按钮状态
-        updateToggleAllButton();
+        // 更新本组全部隐藏按钮状态
+        updateToggleGroupButton(grpId);
     }
     
-    // 切换所有文件的可见性
-    function toggleAllFilesVisibility() {
-        const allFilesCount = AppState.jsonFiles.length;
-        const hiddenFilesCount = AppState.hiddenFiles.size;
+    // 切换本组所有文件的可见性
+    function toggleGroupFilesVisibility(groupId) {
+        const group = AppState.groups[groupId];
+        const allFilesCount = group.jsonFiles.length;
+        const hiddenFilesCount = group.hiddenFiles.size;
         
         if (hiddenFilesCount < allFilesCount) {
             // 如果还有未隐藏的文件，全部隐藏
-            AppState.jsonFiles.forEach(file => {
-                AppState.hiddenFiles.add(file.id);
+            group.jsonFiles.forEach(file => {
+                group.hiddenFiles.add(file.id);
             });
-            showMessage('已隐藏所有文件', 'info');
+            showMessage(`已隐藏学区组${groupId}的所有文件`, 'info');
         } else {
             // 如果全部都已隐藏，全部显示
-            AppState.hiddenFiles.clear();
-            showMessage('已显示所有文件', 'success');
+            group.hiddenFiles.clear();
+            showMessage(`已显示学区组${groupId}的所有文件`, 'success');
         }
         
         // 刷新地图显示
         vectorSource.changed();
         
         // 更新文件列表显示
-        updateJSONFileList($('#fileSearchInput').val());
+        const searchTerm = $(`.fileSearchInput[data-group="${groupId}"]`).val();
+        updateJSONFileList(groupId, searchTerm);
         
-        // 更新全部隐藏按钮状态
-        updateToggleAllButton();
+        // 更新本组全部隐藏按钮状态
+        updateToggleGroupButton(groupId);
     }
     
-    // 更新全部隐藏按钮状态
-    function updateToggleAllButton() {
-        const $btn = $('#toggleAllFilesVisibility');
-        const allFilesCount = AppState.jsonFiles.length;
-        const hiddenFilesCount = AppState.hiddenFiles.size;
+    // 切换所有组的所有文件的可见性
+    function toggleAllGroupsVisibility() {
+        // 计算所有组的总文件数和隐藏文件数
+        let totalFilesCount = 0;
+        let totalHiddenCount = 0;
+        
+        [1, 2, 3].forEach(groupId => {
+            const group = AppState.groups[groupId];
+            totalFilesCount += group.jsonFiles.length;
+            totalHiddenCount += group.hiddenFiles.size;
+        });
+        
+        if (totalHiddenCount < totalFilesCount) {
+            // 如果还有未隐藏的文件，全部隐藏
+            [1, 2, 3].forEach(groupId => {
+                const group = AppState.groups[groupId];
+                group.jsonFiles.forEach(file => {
+                    group.hiddenFiles.add(file.id);
+                });
+            });
+            AppState.allGroupsHidden = true;
+            showMessage('已隐藏所有学区组的所有文件', 'info');
+        } else {
+            // 如果全部都已隐藏，全部显示
+            [1, 2, 3].forEach(groupId => {
+                AppState.groups[groupId].hiddenFiles.clear();
+            });
+            AppState.allGroupsHidden = false;
+            showMessage('已显示所有学区组的所有文件', 'success');
+        }
+        
+        // 刷新地图显示
+        vectorSource.changed();
+        
+        // 更新所有组的文件列表显示
+        [1, 2, 3].forEach(groupId => {
+            const searchTerm = $(`.fileSearchInput[data-group="${groupId}"]`).val();
+            updateJSONFileList(groupId, searchTerm);
+            updateToggleGroupButton(groupId);
+        });
+        
+        // 更新全局全部隐藏按钮状态
+        updateToggleAllGroupsButton();
+    }
+    
+    // 更新本组全部隐藏按钮状态
+    function updateToggleGroupButton(groupId) {
+        const $btn = $(`.btn-toggle-group-visibility[data-group="${groupId}"]`);
+        const group = AppState.groups[groupId];
+        const allFilesCount = group.jsonFiles.length;
+        const hiddenFilesCount = group.hiddenFiles.size;
         
         if (allFilesCount > 0 && hiddenFilesCount === allFilesCount) {
             $btn.addClass('all-hidden');
-            $btn.html('<i class="fas fa-eye-slash"></i> 全部');
-            $btn.attr('title', '显示所有文件');
+            $btn.html('<i class="fas fa-eye-slash"></i> 本组');
+            $btn.attr('title', '显示本组所有文件');
         } else {
             $btn.removeClass('all-hidden');
-            $btn.html('<i class="fas fa-eye"></i> 全部');
-            $btn.attr('title', '隐藏所有文件');
+            $btn.html('<i class="fas fa-eye"></i> 本组');
+            $btn.attr('title', '隐藏本组所有文件');
+        }
+    }
+    
+    // 更新全局全部隐藏按钮状态
+    function updateToggleAllGroupsButton() {
+        const $btn = $('#toggleAllGroupsVisibility');
+        let totalFilesCount = 0;
+        let totalHiddenCount = 0;
+        
+        [1, 2, 3].forEach(groupId => {
+            const group = AppState.groups[groupId];
+            totalFilesCount += group.jsonFiles.length;
+            totalHiddenCount += group.hiddenFiles.size;
+        });
+        
+        if (totalFilesCount > 0 && totalHiddenCount === totalFilesCount) {
+            $btn.addClass('all-hidden');
+            $btn.html('<i class="fas fa-eye-slash"></i> 全部学区组');
+            $btn.attr('title', '显示所有学区组');
+        } else {
+            $btn.removeClass('all-hidden');
+            $btn.html('<i class="fas fa-eye"></i> 全部学区组');
+            $btn.attr('title', '隐藏所有学区组');
         }
     }
     
@@ -1346,20 +1536,23 @@
         $('#assistGeoJSONFolder').click();
     }
     
-    // 文件搜索功能
-    function handleFileSearch() {
-        const searchTerm = $('#fileSearchInput').val().trim();
-        updateJSONFileList(searchTerm);
+    // 文件搜索功能（支持分组）
+    function handleFileSearch(groupId) {
+        const searchTerm = $(`.fileSearchInput[data-group="${groupId}"]`).val().trim();
+        updateJSONFileList(groupId, searchTerm);
     }
     
-    // 清除文件搜索
-    function clearFileSearch() {
-        $('#fileSearchInput').val('');
-        updateJSONFileList();
+    // 清除文件搜索（支持分组）
+    function clearFileSearch(groupId) {
+        $(`.fileSearchInput[data-group="${groupId}"]`).val('');
+        updateJSONFileList(groupId, '');
     }
     
     // 选择JSON文件
-    function selectJSONFile(jsonId) {
+    function selectJSONFile(jsonId, groupId = null) {
+        const grpId = groupId || AppState.currentGroup;
+        const group = AppState.groups[grpId];
+        
         // 清除之前的选择状态
         AppState.selectedFeature = null;
         if (selectInteraction) {
@@ -1367,16 +1560,21 @@
         }
         
         // 查找选中的JSON文件
-        const jsonFile = AppState.jsonFiles.find(f => f.id === jsonId);
+        const jsonFile = group.jsonFiles.find(f => f.id === jsonId);
         if (!jsonFile) return;
         
-        AppState.selectedJSONFile = jsonFile;
+        // 设置为当前组
+        AppState.currentGroup = grpId;
+        group.selectedJSONFile = jsonFile;
+        
+        // 更新Tab显示
+        updateGroupTabs();
         
         // 更新所有要素的样式（非选中文件的要素显示为灰色）
         updateAllFeatureStyles();
         
         // 高亮显示该JSON文件中的所有多边形
-        const features = AppState.jsonFeatureMap.get(jsonId) || [];
+        const features = group.jsonFeatureMap.get(jsonId) || [];
         if (features.length > 0) {
             // 缩放到该JSON文件的范围
             const extent = ol.extent.createEmpty();
@@ -1396,10 +1594,52 @@
             }
         }
         
-        updateJSONFileList();
+        // 更新当前组的文件列表
+        const searchTerm = $(`.fileSearchInput[data-group="${grpId}"]`).val();
+        updateJSONFileList(grpId, searchTerm);
         updateStatus();
         
-        console.log(`选中JSON文件: ${jsonFile.name}, 包含 ${features.length} 个多边形`);
+        console.log(`选中JSON文件: ${jsonFile.name} (组${grpId}), 包含 ${features.length} 个多边形`);
+    }
+    
+    // 切换分组
+    function switchGroup(groupId) {
+        if (groupId === AppState.currentGroup) return;
+        
+        AppState.currentGroup = groupId;
+        
+        // 清除当前选择
+        AppState.selectedFeature = null;
+        if (selectInteraction) {
+            selectInteraction.getFeatures().clear();
+        }
+        
+        // 更新Tab显示
+        updateGroupTabs();
+        
+        // 显示对应组的文件列表
+        $('.group-file-list').removeClass('active');
+        $(`.group-file-list[data-group="${groupId}"]`).addClass('active');
+        
+        // 更新文件列表
+        const searchTerm = $(`.fileSearchInput[data-group="${groupId}"]`).val();
+        updateJSONFileList(groupId, searchTerm);
+        
+        // 更新状态
+        updateStatus();
+        updateAllFeatureStyles();
+        
+        showMessage(`已切换到学区组${groupId}`, 'info');
+    }
+    
+    // 更新分组Tab显示
+    function updateGroupTabs() {
+        $('.group-tab').removeClass('active');
+        $(`.group-tab[data-group="${AppState.currentGroup}"]`).addClass('active');
+        
+        // 更新文件列表容器
+        $('.group-file-list').removeClass('active');
+        $(`.group-file-list[data-group="${AppState.currentGroup}"]`).addClass('active');
     }
     
     // 更新所有要素的样式
@@ -1411,12 +1651,22 @@
         });
     }
     
+    // 检查文件是否被隐藏（考虑组和全局状态）
+    function isFileHidden(fileId, groupId) {
+        const group = AppState.groups[groupId];
+        // 如果全局所有组都被隐藏，或者该文件在组内被隐藏
+        return AppState.allGroupsHidden || group.hiddenFiles.has(fileId);
+    }
+    
     // 清除JSON文件中的所有图形（保留文件）
-    function clearJSONFile(jsonId) {
-        const jsonFile = AppState.jsonFiles.find(f => f.id === jsonId);
+    function clearJSONFile(jsonId, groupId = null) {
+        const grpId = groupId || AppState.currentGroup;
+        const group = AppState.groups[grpId];
+        
+        const jsonFile = group.jsonFiles.find(f => f.id === jsonId);
         if (!jsonFile) return;
         
-        const features = AppState.jsonFeatureMap.get(jsonId) || [];
+        const features = group.jsonFeatureMap.get(jsonId) || [];
         if (features.length === 0) {
             showMessage('该学区中没有图形可清除', 'warning');
             return;
@@ -1437,7 +1687,7 @@
         });
         
         // 清空该文件的要素列表
-        AppState.jsonFeatureMap.set(jsonId, []);
+        group.jsonFeatureMap.set(jsonId, []);
         jsonFile.featureCount = 0;
         
         // 清除当前选中的要素（如果它属于该文件）
@@ -1448,20 +1698,25 @@
             }
         }
         
-        updateJSONFileList();
+        // 更新当前组的文件列表
+        const searchTerm = $(`.fileSearchInput[data-group="${grpId}"]`).val();
+        updateJSONFileList(grpId, searchTerm);
         updateStatus();
         
-        console.log(`清除学区图形: ${jsonFile.name}`);
+        console.log(`清除学区图形: ${jsonFile.name} (组${grpId})`);
         showMessage(`已清除 "${jsonFile.name}" 中的所有图形`, 'success');
     }
     
     // 移除JSON文件（删除文件和所有图形）
-    function removeJSONFile(jsonId) {
-        const jsonFileIndex = AppState.jsonFiles.findIndex(f => f.id === jsonId);
+    function removeJSONFile(jsonId, groupId = null) {
+        const grpId = groupId || AppState.currentGroup;
+        const group = AppState.groups[grpId];
+        
+        const jsonFileIndex = group.jsonFiles.findIndex(f => f.id === jsonId);
         if (jsonFileIndex === -1) return;
         
-        const jsonFile = AppState.jsonFiles[jsonFileIndex];
-        const features = AppState.jsonFeatureMap.get(jsonId) || [];
+        const jsonFile = group.jsonFiles[jsonFileIndex];
+        const features = group.jsonFeatureMap.get(jsonId) || [];
         
         if (!confirm(`确定要移除学区 "${jsonFile.name}" 吗？这将删除该学区及其 ${features.length} 个图形，此操作不可恢复。`)) {
             return;
@@ -1478,33 +1733,36 @@
         });
         
         // 从映射中删除
-        AppState.jsonFeatureMap.delete(jsonId);
+        group.jsonFeatureMap.delete(jsonId);
         
         // 从隐藏列表中删除
-        AppState.hiddenFiles.delete(jsonId);
+        group.hiddenFiles.delete(jsonId);
         
         // 从标星列表中删除
-        AppState.starredFiles.delete(jsonId);
+        group.starredFiles.delete(jsonId);
         
         // 从文件列表中删除
-        AppState.jsonFiles.splice(jsonFileIndex, 1);
+        group.jsonFiles.splice(jsonFileIndex, 1);
         
         // 如果删除的是当前选中的文件，需要重新选择
-        if (AppState.selectedJSONFile && AppState.selectedJSONFile.id === jsonId) {
-            AppState.selectedJSONFile = null;
+        if (group.selectedJSONFile && group.selectedJSONFile.id === jsonId) {
+            group.selectedJSONFile = null;
             AppState.selectedFeature = null;
             
             // 如果还有其他文件，自动选择第一个
-            if (AppState.jsonFiles.length > 0) {
-                selectJSONFile(AppState.jsonFiles[0].id);
+            if (group.jsonFiles.length > 0) {
+                selectJSONFile(group.jsonFiles[0].id, grpId);
             }
         }
         
-        updateJSONFileList();
+        // 更新当前组的文件列表
+        const searchTerm = $(`.fileSearchInput[data-group="${grpId}"]`).val();
+        updateJSONFileList(grpId, searchTerm);
         updateStatus();
-        updateToggleAllButton();
+        updateToggleGroupButton(grpId);
+        updateToggleAllGroupsButton();
         
-        console.log(`移除学区: ${jsonFile.name}`);
+        console.log(`移除学区: ${jsonFile.name} (组${grpId})`);
         showMessage(`已移除学区 "${jsonFile.name}"`, 'success');
     }
     
@@ -1562,16 +1820,20 @@
                     const name = feature.get('name') || '';
                     const isSelected = feature === AppState.selectedFeature;
                     const featureFileId = feature.get('sourceFileId');
-                    const isInSelectedFile = AppState.selectedJSONFile && 
-                                             AppState.selectedJSONFile.id === featureFileId;
+                    const featureGroupId = feature.get('sourceGroupId');
                     
-                    // 如果文件被隐藏，不显示该要素
-                    if (featureFileId && AppState.hiddenFiles.has(featureFileId)) {
+                    // 获取该要素所属组的选中文件
+                    const group = featureGroupId ? AppState.groups[featureGroupId] : null;
+                    const isInSelectedFile = group && group.selectedJSONFile && 
+                                             group.selectedJSONFile.id === featureFileId;
+                    
+                    // 如果文件被隐藏（考虑组和全局状态），不显示该要素
+                    if (featureFileId && featureGroupId && isFileHidden(featureFileId, featureGroupId)) {
                         return null; // 返回null使要素不可见
                     }
                     
                     // 如果要素不属于当前选中的文件，显示为灰色禁用状态，但仍显示文字
-                    if (!isInSelectedFile && AppState.selectedJSONFile) {
+                    if (!isInSelectedFile && group && group.selectedJSONFile) {
                         const styles = [
                             new ol.style.Style({
                                 fill: new ol.style.Fill({
@@ -2138,18 +2400,25 @@
     
     // ========== 交互初始化 ==========
     function initInteractions() {
-        // 选择交互 - 使用条件函数来限制选择
+        // 选择交互 - 允许选择所有可见的学区多边形（不限于当前组）
         selectInteraction = new ol.interaction.Select({
             layers: [window.mapLayers.vectorLayer],
             filter: function(feature, layer) {
-                // 如果当前没有选中的文件，不允许选择任何要素
-                if (!AppState.selectedJSONFile) {
+                // 只过滤掉被隐藏的要素，允许选择任何可见的学区多边形
+                const featureFileId = feature.get('sourceFileId');
+                const featureGroupId = feature.get('sourceGroupId');
+                
+                // 如果要素不属于任何文件/组，允许选择（兼容性处理）
+                if (!featureFileId || !featureGroupId) {
+                    return true;
+                }
+                
+                // 检查文件是否被隐藏
+                if (isFileHidden(featureFileId, featureGroupId)) {
                     return false;
                 }
                 
-                // 只允许选择当前选中文件的要素
-                const featureFileId = feature.get('sourceFileId');
-                return featureFileId === AppState.selectedJSONFile.id;
+                return true;
             }
         });
         
@@ -2157,6 +2426,9 @@
             if (event.selected.length > 0) {
                 const feature = event.selected[0];
                 AppState.selectedFeature = feature;
+                
+                // 自动定位到左侧列表中的对应学区文件
+                autoLocateFileInList(feature);
             } else {
                 AppState.selectedFeature = null;
             }
@@ -2171,9 +2443,10 @@
         // 辅助多边形编辑交互
         initAssistPolygonModifyInteraction();
         
-        // 修改交互 - 只允许修改当前选中文件的要素
+        // 修改交互 - 允许修改任何已选中的要素
         modifyInteraction = new ol.interaction.Modify({
             source: vectorSource,
+            features: selectInteraction.getFeatures(),
             style: new ol.style.Style({
                 image: new ol.style.Circle({
                     radius: 7,
@@ -2186,19 +2459,7 @@
                     })
                 })
             }),
-            pixelTolerance: 15,
-            condition: function(event) {
-                // 只允许编辑当前选中文件的要素
-                const feature = selectInteraction.getFeatures().item(0);
-                if (!feature || !AppState.selectedJSONFile) {
-                    return false;
-                }
-                const featureFileId = feature.get('sourceFileId');
-                if (featureFileId !== AppState.selectedJSONFile.id) {
-                    return false;
-                }
-                return ol.events.condition.primaryAction(event);
-            }
+            pixelTolerance: 15
         });
         
         // 监听修改开始事件来追踪顶点
@@ -3104,9 +3365,10 @@
     
     // ========== 绘制功能 ==========
     function startDrawPolygon() {
-        // 检查是否有选中的文件
-        if (!AppState.selectedJSONFile) {
-            showMessage('请先选择一个学区文件', 'warning');
+        // 检查当前组是否有选中的文件
+        const currentGroup = getCurrentGroup();
+        if (!currentGroup.selectedJSONFile) {
+            showMessage(`请先选择学区组${AppState.currentGroup}中的一个学区文件`, 'warning');
             return;
         }
         
@@ -3191,25 +3453,29 @@
             const featureId = 'polygon_' + Date.now();
             feature.setId(featureId);
             
-            // 标记该要素属于哪个文件
-            feature.set('sourceFileId', AppState.selectedJSONFile.id);
-            feature.set('sourceFileName', AppState.selectedJSONFile.name);
+            const currentGroup = getCurrentGroup();
+            
+            // 标记该要素属于哪个文件和组
+            feature.set('sourceFileId', currentGroup.selectedJSONFile.id);
+            feature.set('sourceFileName', currentGroup.selectedJSONFile.name);
+            feature.set('sourceGroupId', AppState.currentGroup);
             
             // 添加到对应文件的要素列表
-            const features = AppState.jsonFeatureMap.get(AppState.selectedJSONFile.id) || [];
+            const features = currentGroup.jsonFeatureMap.get(currentGroup.selectedJSONFile.id) || [];
             features.push(feature);
-            AppState.jsonFeatureMap.set(AppState.selectedJSONFile.id, features);
-            AppState.selectedJSONFile.featureCount = features.length;
+            currentGroup.jsonFeatureMap.set(currentGroup.selectedJSONFile.id, features);
+            currentGroup.selectedJSONFile.featureCount = features.length;
             
-            console.log(`多边形绘制完成，ID: ${featureId}, 所属文件: ${AppState.selectedJSONFile.name}`);
+            console.log(`多边形绘制完成，ID: ${featureId}, 所属文件: ${currentGroup.selectedJSONFile.name}, 组: ${AppState.currentGroup}`);
             
             // 提示用户输入多边形名称
             setTimeout(() => {
                 promptPolygonName(feature);
             }, 100);
             
-            // 更新文件列表显示
-            updateJSONFileList();
+            // 更新当前组的文件列表显示
+            const searchTerm = $(`.fileSearchInput[data-group="${AppState.currentGroup}"]`).val();
+            updateJSONFileList(AppState.currentGroup, searchTerm);
         });
         
         map.addInteraction(drawInteraction);
@@ -4680,15 +4946,34 @@
     
     // ========== 编辑功能 ==========
     function startSelectMode() {
+        // 如果已经在选择模式，则退出到浏览模式
+        if (AppState.currentMode === 'select') {
+            stopSelectMode();
+            return;
+        }
+        
         stopDrawing();
         stopEditPolygon();
+        stopAssistPolygonEdit();
+        stopAssistSelectMode();
         
         selectInteraction.setActive(true);
         AppState.currentMode = 'select';
         updateToolbarButtons();
         updateStatus();
         
-        showMessage('选择模式已激活，点击多边形进行选择', 'info');
+        showMessage('选择模式已激活，点击多边形进行选择，左侧列表会自动定位', 'info');
+    }
+    
+    function stopSelectMode() {
+        if (selectInteraction) {
+            selectInteraction.setActive(false);
+            selectInteraction.getFeatures().clear();
+        }
+        AppState.selectedFeature = null;
+        AppState.currentMode = 'browse';
+        updateToolbarButtons();
+        updateStatus();
     }
     
     function startEditPolygon() {
@@ -4697,11 +4982,29 @@
             return;
         }
         
-        // 检查选中的要素是否属于当前文件
         const featureFileId = AppState.selectedFeature.get('sourceFileId');
-        if (!AppState.selectedJSONFile || featureFileId !== AppState.selectedJSONFile.id) {
-            showMessage('只能编辑当前选中文件中的多边形', 'warning');
+        const featureGroupId = AppState.selectedFeature.get('sourceGroupId');
+        
+        // 获取要素所属的组
+        const group = AppState.groups[featureGroupId];
+        if (!group) {
+            showMessage('无法确定多边形所属组', 'error');
             return;
+        }
+        
+        // 如果不在该组，先切换到那个组
+        if (featureGroupId !== AppState.currentGroup) {
+            switchGroup(featureGroupId);
+        }
+        
+        // 设置该文件为选中状态
+        const jsonFile = group.jsonFiles.find(f => f.id === featureFileId);
+        if (jsonFile) {
+            group.selectedJSONFile = jsonFile;
+            updateAllFeatureStyles();
+            // 更新文件列表
+            const searchTerm = $(`.fileSearchInput[data-group="${featureGroupId}"]`).val();
+            updateJSONFileList(featureGroupId, searchTerm);
         }
         
         stopDrawing();
@@ -4743,11 +5046,26 @@
             return;
         }
         
-        // 检查选中的要素是否属于当前文件
         const featureFileId = AppState.selectedFeature.get('sourceFileId');
-        if (!AppState.selectedJSONFile || featureFileId !== AppState.selectedJSONFile.id) {
-            showMessage('只能删除当前选中文件中的多边形', 'warning');
+        const featureGroupId = AppState.selectedFeature.get('sourceGroupId');
+        
+        // 获取要素所属的组
+        const group = AppState.groups[featureGroupId];
+        if (!group) {
+            showMessage('无法确定多边形所属组', 'error');
             return;
+        }
+        
+        // 如果不在该组，先切换到那个组
+        if (featureGroupId !== AppState.currentGroup) {
+            switchGroup(featureGroupId);
+        }
+        
+        // 设置该文件为选中状态
+        const jsonFile = group.jsonFiles.find(f => f.id === featureFileId);
+        if (jsonFile) {
+            group.selectedJSONFile = jsonFile;
+            updateAllFeatureStyles();
         }
         
         if (confirm('删除选中多边形？')) {
@@ -4757,14 +5075,13 @@
             vectorSource.removeFeature(AppState.selectedFeature);
             
             // 从对应文件的要素列表中移除
-            const features = AppState.jsonFeatureMap.get(featureFileId) || [];
+            const features = group.jsonFeatureMap.get(featureFileId) || [];
             const index = features.findIndex(f => f.getId() === featureId);
             if (index !== -1) {
                 features.splice(index, 1);
             }
             
             // 更新文件计数
-            const jsonFile = AppState.jsonFiles.find(f => f.id === featureFileId);
             if (jsonFile) {
                 jsonFile.featureCount = features.length;
             }
@@ -4777,7 +5094,9 @@
             AppState.selectedFeature = null;
             selectInteraction.getFeatures().clear();
             
-            updateJSONFileList();
+            // 更新文件列表
+            const searchTerm = $(`.fileSearchInput[data-group="${featureGroupId}"]`).val();
+            updateJSONFileList(featureGroupId, searchTerm);
             updateStatus();
             
             showMessage('多边形已删除', 'success');
@@ -4786,22 +5105,24 @@
     
     // ========== 数据管理 ==========
     function exportToGeoJSON() {
+        const currentGroup = getCurrentGroup();
+        
         // 如果没有选中的文件，提示用户
-        if (!AppState.selectedJSONFile) {
-            showMessage('请先选择一个学区文件', 'warning');
+        if (!currentGroup.selectedJSONFile) {
+            showMessage(`请先选择学区组${AppState.currentGroup}中的一个学区文件`, 'warning');
             return;
         }
         
-        const fileId = AppState.selectedJSONFile.id;
-        const featuresToExport = AppState.jsonFeatureMap.get(fileId) || [];
-        const exportFileName = AppState.selectedJSONFile.name.replace(/\.[^/.]+$/, '') + '.geojson';
+        const fileId = currentGroup.selectedJSONFile.id;
+        const featuresToExport = currentGroup.jsonFeatureMap.get(fileId) || [];
+        const exportFileName = currentGroup.selectedJSONFile.name.replace(/\.[^/.]+$/, '') + '.geojson';
         
         if (featuresToExport.length === 0) {
             showMessage('选中的学区文件中没有多边形可导出', 'warning');
             return;
         }
         
-        console.log('导出文件:', AppState.selectedJSONFile.name);
+        console.log(`导出文件 (组${AppState.currentGroup}):`, currentGroup.selectedJSONFile.name);
         console.log('导出要素数量:', featuresToExport.length);
         
         try {
@@ -4835,9 +5156,9 @@
             
             // 添加文件级别的元数据，包括标星状态
             geoJSON.properties = {
-                fileName: AppState.selectedJSONFile.name,
+                fileName: currentGroup.selectedJSONFile.name,
                 exportTime: new Date().toLocaleString(),
-                isStarred: AppState.starredFiles.has(fileId)
+                isStarred: currentGroup.starredFiles.has(fileId)
             };
             
             const dataStr = JSON.stringify(geoJSON, null, 2);
@@ -4919,8 +5240,11 @@
         return { isAssist: false };
     }
     
-    // 处理文件夹导入（多个文件）
-    function handleGeoJSONFolderImport(event) {
+    // 处理文件夹导入（多个文件，支持分组）
+    function handleGeoJSONFolderImport(event, groupId = null) {
+        const grpId = groupId || AppState.currentGroup;
+        const group = AppState.groups[grpId];
+        
         const files = Array.from(event.target.files);
         
         // 过滤出geojson文件
@@ -4934,14 +5258,14 @@
             return;
         }
         
-        console.log(`准备导入文件夹中的 ${geojsonFiles.length} 个GeoJSON文件`);
-        showMessage(`开始导入 ${geojsonFiles.length} 个文件...`, 'info');
+        console.log(`准备导入文件夹中的 ${geojsonFiles.length} 个GeoJSON文件到学区组${grpId}`);
+        showMessage(`开始导入 ${geojsonFiles.length} 个文件到学区组${grpId}...`, 'info');
         
         let importedCount = 0;
-        let skippedCount = 0;  // 跳过的辅助要素文件
+        let skippedCount = 0;
         let failedCount = 0;
         let processedCount = 0;
-        const skippedFiles = [];  // 记录被跳过的文件名
+        const skippedFiles = [];
         
         // 依次处理每个文件
         geojsonFiles.forEach((file, index) => {
@@ -4960,7 +5284,7 @@
                         throw new Error('缺少features数组');
                     }
                     
-                    // 检查是否是辅助要素文件（文件名+内容双重检测）
+                    // 检查是否是辅助要素文件
                     const assistCheck = isAssistFeatureFile(file.name, geoJSONData);
                     
                     if (assistCheck.isAssist) {
@@ -4979,7 +5303,7 @@
                     const isStarredFromFile = geoJSONData.properties && geoJSONData.properties.isStarred === true;
                     
                     // 创建新的JSON文件记录
-                    const fileId = 'file_' + Date.now() + '_' + index;
+                    const fileId = 'file_' + Date.now() + '_' + index + '_g' + grpId;
                     const jsonFile = {
                         id: fileId,
                         name: file.name,
@@ -4989,7 +5313,7 @@
                     
                     // 如果文件本身标记为标星，则添加到标星列表
                     if (isStarredFromFile) {
-                        AppState.starredFiles.add(fileId);
+                        group.starredFiles.add(fileId);
                     }
                     
                     // 解析GeoJSON要素
@@ -5007,12 +5331,13 @@
                             }
                             
                             // 设置唯一ID
-                            const featureId = 'imported_' + Date.now() + '_' + index + '_' + idx;
+                            const featureId = 'imported_' + Date.now() + '_' + index + '_' + idx + '_g' + grpId;
                             feature.setId(featureId);
                             
-                            // 标记该要素属于新导入的文件
+                            // 标记该要素属于新导入的文件和组
                             feature.set('sourceFileId', fileId);
                             feature.set('sourceFileName', file.name);
+                            feature.set('sourceGroupId', grpId);
                             feature.set('isAssistFeature', false);
                             
                             // 读取并设置多边形名称
@@ -5032,8 +5357,8 @@
                     
                     // 更新文件记录
                     jsonFile.featureCount = importedFeatures.length;
-                    AppState.jsonFiles.push(jsonFile);
-                    AppState.jsonFeatureMap.set(fileId, importedFeatures);
+                    group.jsonFiles.push(jsonFile);
+                    group.jsonFeatureMap.set(fileId, importedFeatures);
                     importedCount++;
                     
                 } catch (error) {
@@ -5058,18 +5383,20 @@
         function checkComplete() {
             if (processedCount === geojsonFiles.length) {
                 // 所有文件处理完成
-                updateJSONFileList();
-                updateToggleAllButton();
+                const searchTerm = $(`.fileSearchInput[data-group="${grpId}"]`).val();
+                updateJSONFileList(grpId, searchTerm);
+                updateToggleGroupButton(grpId);
+                updateToggleAllGroupsButton();
                 
                 // 如果有导入成功的文件，选中最后一个
-                if (importedCount > 0 && AppState.jsonFiles.length > 0) {
-                    selectJSONFile(AppState.jsonFiles[AppState.jsonFiles.length - 1].id);
+                if (importedCount > 0 && group.jsonFiles.length > 0) {
+                    selectJSONFile(group.jsonFiles[group.jsonFiles.length - 1].id, grpId);
                     
                     // 缩放到所有导入数据的范围
                     const extent = ol.extent.createEmpty();
                     let hasValidExtent = false;
-                    AppState.jsonFiles.forEach(file => {
-                        const features = AppState.jsonFeatureMap.get(file.id) || [];
+                    group.jsonFiles.forEach(file => {
+                        const features = group.jsonFeatureMap.get(file.id) || [];
                         features.forEach(feature => {
                             const geometry = feature.getGeometry();
                             if (geometry) {
@@ -5094,7 +5421,7 @@
                 if (skippedCount > 0) msgParts.push(`跳过 ${skippedCount} 个辅助要素文件`);
                 if (failedCount > 0) msgParts.push(`失败 ${failedCount} 个`);
                 
-                const msg = `文件夹导入完成: ${msgParts.join(', ')}`;
+                const msg = `学区组${grpId}文件夹导入完成: ${msgParts.join(', ')}`;
                 console.log(msg);
                 if (skippedFiles.length > 0) {
                     console.log('跳过的辅助要素文件:', skippedFiles);
@@ -5109,7 +5436,11 @@
         event.target.value = '';
     }
     
-    function handleGeoJSONImport(event) {
+    // 处理单个GeoJSON文件导入（支持分组）
+    function handleGeoJSONImport(event, groupId = null) {
+        const grpId = groupId || AppState.currentGroup;
+        const group = AppState.groups[grpId];
+        
         const file = event.target.files[0];
         if (!file) {
             return;
@@ -5121,7 +5452,7 @@
             try {
                 const geoJSONData = JSON.parse(e.target.result);
                 
-                console.log('导入多边形文件:', file.name);
+                console.log(`导入多边形文件到学区组${grpId}:`, file.name);
                 
                 // 验证GeoJSON格式
                 if (!geoJSONData.type || geoJSONData.type !== 'FeatureCollection') {
@@ -5132,17 +5463,13 @@
                     throw new Error('无效的GeoJSON格式：缺少features数组');
                 }
                 
-                // ===== 辅助要素文件检测 =====
-                // 检查文件名是否包含"辅助要素"关键词
+                // 辅助要素文件检测
                 const isAssistFileByName = file.name.includes('辅助要素') || 
                                              file.name.toLowerCase().includes('assist');
                 
-                // 检查是否所有要素都是辅助要素类型
                 let assistFeatureCount = 0;
                 geoJSONData.features.forEach(featureData => {
                     const type = featureData.properties && featureData.properties.type;
-                    const geomType = featureData.geometry && featureData.geometry.type;
-                    // LineString但不是多边形文件常见的类型，或明确标记为辅助要素
                     if (type === 'assistLine' || type === 'assistPolygon' || type === 'assistText' ||
                         type === 'line' || type === 'text') {
                         assistFeatureCount++;
@@ -5151,11 +5478,9 @@
                 const isAssistFileByContent = assistFeatureCount > 0 && 
                                                assistFeatureCount === geoJSONData.features.length;
                 
-                // 如果检测到可能是辅助要素文件，提示用户
                 if (isAssistFileByName || isAssistFileByContent) {
                     console.warn('检测到可能是辅助要素文件:', file.name);
                     showMessage('检测到辅助要素文件，请使用工具栏中的"导入辅助要素"按钮导入', 'warning');
-                    // 不处理此文件，让用户用正确的功能导入
                     event.target.value = '';
                     return;
                 }
@@ -5168,7 +5493,7 @@
                 const importedFeatures = [];
                 
                 // 创建新的JSON文件记录
-                const fileId = 'file_' + Date.now();
+                const fileId = 'file_' + Date.now() + '_g' + grpId;
                 const jsonFile = {
                     id: fileId,
                     name: file.name,
@@ -5178,7 +5503,7 @@
                 
                 // 如果文件本身标记为标星，则添加到标星列表
                 if (isStarredFromFile) {
-                    AppState.starredFiles.add(fileId);
+                    group.starredFiles.add(fileId);
                 }
                 
                 // 解析GeoJSON要素
@@ -5200,17 +5525,16 @@
                         const importTimestamp = Date.now();
                         let featureId = feature.getId();
                         if (!featureId) {
-                            featureId = 'imported_' + importTimestamp + '_' + index;
+                            featureId = 'imported_' + importTimestamp + '_' + index + '_g' + grpId;
                         } else {
-                            featureId = featureId + '_imported_' + importTimestamp;
+                            featureId = featureId + '_imported_' + importTimestamp + '_g' + grpId;
                         }
                         feature.setId(featureId);
                         
-                        // 标记该要素属于新导入的文件
+                        // 标记该要素属于新导入的文件和组
                         feature.set('sourceFileId', fileId);
                         feature.set('sourceFileName', file.name);
-                        
-                        // 标记为非辅助要素
+                        feature.set('sourceGroupId', grpId);
                         feature.set('isAssistFeature', false);
                         
                         // 读取并设置多边形名称
@@ -5231,13 +5555,15 @@
                 
                 // 更新文件记录
                 jsonFile.featureCount = successCount;
-                AppState.jsonFiles.push(jsonFile);
-                AppState.jsonFeatureMap.set(fileId, importedFeatures);
+                group.jsonFiles.push(jsonFile);
+                group.jsonFeatureMap.set(fileId, importedFeatures);
                 
                 // 更新文件列表并选中新导入的文件
-                updateJSONFileList();
-                updateToggleAllButton();
-                selectJSONFile(fileId);
+                const searchTerm = $(`.fileSearchInput[data-group="${grpId}"]`).val();
+                updateJSONFileList(grpId, searchTerm);
+                updateToggleGroupButton(grpId);
+                updateToggleAllGroupsButton();
+                selectJSONFile(fileId, grpId);
                 
                 // 居中显示新导入的数据
                 if (successCount > 0 && importedFeatures.length > 0) {
@@ -5258,7 +5584,7 @@
                     }
                 }
                 
-                const message = `成功导入 ${successCount} 个多边形要素从学区文件 ${file.name}`;
+                const message = `成功导入 ${successCount} 个多边形要素到学区组${grpId}: ${file.name}`;
                 console.log(message);
                 showMessage(message, 'success');
                 
@@ -6001,7 +6327,10 @@
     }
     
     // ========== 加载示例学区数据 ==========
-    function loadSampleSchoolZone() {
+    function loadSampleSchoolZone(targetGroupId = null) {
+        const grpId = targetGroupId || AppState.currentGroup;
+        const group = AppState.groups[grpId];
+        
         // 火炬学校教育集团火炬校区学区数据（基于天地图精确坐标）
         const sampleData = {
             "type": "FeatureCollection",
@@ -6187,10 +6516,10 @@
         };
         
         // 检查是否已存在该文件
-        const existingFile = AppState.jsonFiles.find(f => f.name === '火炬校区学区范围.geojson');
+        const existingFile = group.jsonFiles.find(f => f.name === '火炬校区学区范围.geojson');
         if (existingFile) {
-            showMessage('示例学区数据已存在，请勿重复加载', 'warning');
-            selectJSONFile(existingFile.id);
+            showMessage(`学区组${grpId}中示例学区数据已存在，请勿重复加载`, 'warning');
+            selectJSONFile(existingFile.id, grpId);
             return;
         }
         
@@ -6199,7 +6528,7 @@
         const importedFeatures = [];
         
         // 创建新的JSON文件记录
-        const fileId = 'file_' + Date.now();
+        const fileId = 'file_' + Date.now() + '_g' + grpId;
         const jsonFile = {
             id: fileId,
             name: '火炬校区学区范围.geojson',
@@ -6215,13 +6544,14 @@
                     dataProjection: 'EPSG:4326'
                 });
                 
-                // 设置唯一ID
-                const featureId = 'sample_' + Date.now() + '_' + index;
+                // 设置唯一ID，包含组信息
+                const featureId = 'sample_' + Date.now() + '_' + index + '_g' + grpId;
                 feature.setId(featureId);
                 
-                // 标记该要素属于新导入的文件
+                // 标记该要素属于新导入的文件和组
                 feature.set('sourceFileId', fileId);
                 feature.set('sourceFileName', jsonFile.name);
+                feature.set('sourceGroupId', grpId);
                 
                 // 读取并设置多边形名称
                 if (featureData.properties && featureData.properties.name) {
@@ -6240,12 +6570,15 @@
         
         // 更新文件记录
         jsonFile.featureCount = importedFeatures.length;
-        AppState.jsonFiles.push(jsonFile);
-        AppState.jsonFeatureMap.set(fileId, importedFeatures);
+        group.jsonFiles.push(jsonFile);
+        group.jsonFeatureMap.set(fileId, importedFeatures);
         
         // 更新文件列表并选中新导入的文件
-        updateJSONFileList();
-        selectJSONFile(fileId);
+        const searchTerm = $(`.fileSearchInput[data-group="${grpId}"]`).val();
+        updateJSONFileList(grpId, searchTerm);
+        selectJSONFile(fileId, grpId);
+        updateToggleGroupButton(grpId);
+        updateToggleAllGroupsButton();
         
         // 居中显示数据
         if (importedFeatures.length > 0) {
@@ -6266,28 +6599,64 @@
             }
         }
         
-        showMessage(`✅ 已加载示例学区数据：火炬校区学区范围，共 ${importedFeatures.length} 个要素`, 'success');
-        console.log('示例学区数据加载完成:', jsonFile.name);
+        showMessage(`✅ 学区组${grpId}已加载示例学区数据：火炬校区学区范围，共 ${importedFeatures.length} 个要素`, 'success');
+        console.log('示例学区数据加载完成:', jsonFile.name, '组:', grpId);
     }
     
     // ========== 事件绑定 ==========
     function bindEvents() {
         console.log('绑定事件...');
         
-        // JSON文件导入
-        $('#importGeoJSON').on('click', importGeoJSON);
-        $('#geoJSONFile').on('change', handleGeoJSONImport);
+        // 分组Tab切换
+        $('.group-tab').on('click', function() {
+            const groupId = parseInt($(this).data('group'));
+            switchGroup(groupId);
+        });
         
-        // 文件夹导入
-        $('#importFolder').on('click', importGeoJSONFolder);
-        $('#geoJSONFolder').on('change', handleGeoJSONFolderImport);
+        // 全局全部隐藏/显示按钮
+        $('#toggleAllGroupsVisibility').on('click', toggleAllGroupsVisibility);
         
-        // 文件搜索
-        $('#fileSearchInput').on('input', handleFileSearch);
-        $('#clearFileSearch').on('click', clearFileSearch);
+        // 各组的导入按钮
+        $('.btn-import-group').on('click', function() {
+            const groupId = $(this).data('group');
+            $(`.geoJSONFileGroup[data-group="${groupId}"]`).click();
+        });
         
-        // 全部隐藏/显示
-        $('#toggleAllFilesVisibility').on('click', toggleAllFilesVisibility);
+        // 各组的文件夹导入按钮
+        $('.btn-import-folder-group').on('click', function() {
+            const groupId = $(this).data('group');
+            $(`.geoJSONFolderGroup[data-group="${groupId}"]`).click();
+        });
+        
+        // 各组的文件输入change事件
+        $('.geoJSONFileGroup').on('change', function() {
+            const groupId = $(this).data('group');
+            handleGeoJSONImport({target: this}, groupId);
+        });
+        
+        // 各组的文件夹输入change事件
+        $('.geoJSONFolderGroup').on('change', function() {
+            const groupId = $(this).data('group');
+            handleGeoJSONFolderImport({target: this}, groupId);
+        });
+        
+        // 各组的搜索输入
+        $('.fileSearchInput').on('input', function() {
+            const groupId = $(this).data('group');
+            handleFileSearch(groupId);
+        });
+        
+        // 各组的清除搜索按钮
+        $('.clearFileSearch').on('click', function() {
+            const groupId = $(this).data('group');
+            clearFileSearch(groupId);
+        });
+        
+        // 各组的全部隐藏/显示按钮
+        $('.btn-toggle-group-visibility').on('click', function() {
+            const groupId = $(this).data('group');
+            toggleGroupFilesVisibility(groupId);
+        });
         
         // 辅助要素文件选择事件（由侧边栏导入按钮触发）
         $('#assistGeoJSONFile').on('change', function(e) {
@@ -6704,9 +7073,10 @@
         return `新建学区_${timestamp}.geojson`;
     }
     
-    // 创建新的JSON文件
-    function createNewJSONFile(fileName) {
-        const fileId = 'file_' + Date.now() + '_' + AppState.nextFileId++;
+    // 为指定组创建新的JSON文件
+    function createNewJSONFileForGroup(fileName, groupId) {
+        const group = AppState.groups[groupId];
+        const fileId = 'file_' + Date.now() + '_' + group.nextFileId++ + '_g' + groupId;
         const jsonFile = {
             id: fileId,
             name: fileName || generateDefaultFileName(),
@@ -6715,19 +7085,31 @@
             isDefault: !fileName // 标记是否为默认创建的文件
         };
         
-        AppState.jsonFiles.push(jsonFile);
-        AppState.jsonFeatureMap.set(fileId, []);
+        group.jsonFiles.push(jsonFile);
+        group.jsonFeatureMap.set(fileId, []);
         
-        updateJSONFileList();
-        updateToggleAllButton();
+        // 如果是当前组，更新列表显示
+        if (groupId === AppState.currentGroup) {
+            const searchTerm = $(`.fileSearchInput[data-group="${groupId}"]`).val();
+            updateJSONFileList(groupId, searchTerm);
+        }
         
-        // 自动选中新创建的文件
-        selectJSONFile(fileId);
+        updateToggleGroupButton(groupId);
+        updateToggleAllGroupsButton();
         
-        console.log(`创建新学区文件: ${jsonFile.name}, ID: ${fileId}`);
-        showMessage(`已创建默认学区: ${jsonFile.name}`, 'success');
+        // 如果是当前组，自动选中新创建的文件
+        if (groupId === AppState.currentGroup) {
+            selectJSONFile(fileId, groupId);
+        }
+        
+        console.log(`创建新学区文件: ${jsonFile.name}, ID: ${fileId}, 组: ${groupId}`);
         
         return jsonFile;
+    }
+    
+    // 创建新的JSON文件（向后兼容，默认创建到当前组）
+    function createNewJSONFile(fileName) {
+        return createNewJSONFileForGroup(fileName, AppState.currentGroup);
     }
     
     // ========== 应用初始化 ==========
@@ -6766,9 +7148,12 @@
         // 绑定事件
         bindEvents();
         
-        // 创建默认数据
+        // 为每个组创建默认文件
         try {
-            createNewJSONFile(generateDefaultFileName());
+            [1, 2, 3].forEach(groupId => {
+                const defaultFileName = `新建学区_组${groupId}_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.geojson`;
+                createNewJSONFileForGroup(defaultFileName, groupId);
+            });
             createDefaultAssistLayer();
             LoadingManager.update('data', 100);
         } catch (error) {
@@ -6778,13 +7163,21 @@
         // 初始化UI状态
         updateLayerToggleButton();
         updateKeyStatusDisplay();
+        updateGroupTabs();
+        
+        // 初始化各组的文件列表
+        [1, 2, 3].forEach(groupId => {
+            updateJSONFileList(groupId);
+            updateToggleGroupButton(groupId);
+        });
+        updateToggleAllGroupsButton();
         updateStatus();
         
         // 标记完成
         LoadingManager.update('complete', 100);
         
         console.log('GIS应用初始化完成');
-        showMessage('GIS应用已就绪！已创建默认文件', 'success');
+        showMessage('GIS应用已就绪！已为3个学区组创建默认文件', 'success');
         
         // 检查是否需要显示向导（首次访问）
         initTourGuide();
@@ -7084,4 +7477,297 @@
         }
     });
     
+    // ========== 学区着色功能 ==========
+    
+    // 预设颜色（带透明度）
+    const DISTRICT_COLORS = [
+        { fill: 'rgba(231, 76, 60, 0.5)', stroke: '#c0392b', name: '红色' },   // #e74c3c
+        { fill: 'rgba(52, 152, 219, 0.5)', stroke: '#2980b9', name: '蓝色' },  // #3498db
+        { fill: 'rgba(46, 204, 113, 0.5)', stroke: '#27ae60', name: '绿色' },  // #2ecc71
+        { fill: 'rgba(243, 156, 18, 0.5)', stroke: '#d68910', name: '橙色' },  // #f39c12
+        { fill: 'rgba(155, 89, 182, 0.5)', stroke: '#8e44ad', name: '紫色' }   // #9b59b6
+    ];
+    
+    /**
+     * 判断两个多边形是否相邻（相交或共享边界）
+     * 使用turf.js进行空间分析
+     */
+    function arePolygonsAdjacent(feature1, feature2) {
+        try {
+            const geom1 = feature1.getGeometry();
+            const geom2 = feature2.getGeometry();
+            
+            if (!geom1 || !geom2) return false;
+            
+            // 转换为GeoJSON格式供turf使用
+            const format = new ol.format.GeoJSON();
+            const geojson1 = format.writeFeatureObject(feature1, {
+                featureProjection: 'EPSG:3857',
+                dataProjection: 'EPSG:4326'
+            });
+            const geojson2 = format.writeFeatureObject(feature2, {
+                featureProjection: 'EPSG:3857',
+                dataProjection: 'EPSG:4326'
+            });
+            
+            // 使用turf检查是否相交
+            const intersection = turf.intersect(geojson1.geometry, geojson2.geometry);
+            
+            // 如果有交集（包括边界接触），返回true
+            return intersection !== null;
+        } catch (e) {
+            console.warn('判断相邻时出错:', e);
+            return false;
+        }
+    }
+    
+    /**
+     * 构建邻接矩阵
+     * 返回一个Map，key是feature id，value是与该feature相邻的所有feature id数组
+     */
+    function buildAdjacencyMatrix(features) {
+        const adjacencyMap = new Map();
+        const n = features.length;
+        
+        // 初始化邻接表
+        features.forEach((feature, index) => {
+            const featureId = feature.getId() || `feature_${index}`;
+            feature.setId(featureId);
+            adjacencyMap.set(featureId, []);
+        });
+        
+        // 计算所有多边形之间的邻接关系
+        for (let i = 0; i < n; i++) {
+            const featureId1 = features[i].getId();
+            for (let j = i + 1; j < n; j++) {
+                const featureId2 = features[j].getId();
+                
+                if (arePolygonsAdjacent(features[i], features[j])) {
+                    adjacencyMap.get(featureId1).push(featureId2);
+                    adjacencyMap.get(featureId2).push(featureId1);
+                }
+            }
+        }
+        
+        return adjacencyMap;
+    }
+    
+    /**
+     * 贪心算法分配颜色
+     * 确保相邻多边形颜色不同
+     */
+    function assignColorsWithGreedyAlgorithm(features, adjacencyMap) {
+        const colorMap = new Map();
+        
+        features.forEach(feature => {
+            const featureId = feature.getId();
+            const neighbors = adjacencyMap.get(featureId) || [];
+            
+            // 收集相邻多边形已使用的颜色
+            const usedColors = new Set();
+            neighbors.forEach(neighborId => {
+                if (colorMap.has(neighborId)) {
+                    usedColors.add(colorMap.get(neighborId));
+                }
+            });
+            
+            // 找到第一个未使用的颜色
+            let assignedColorIndex = 0;
+            for (let i = 0; i < DISTRICT_COLORS.length; i++) {
+                if (!usedColors.has(i)) {
+                    assignedColorIndex = i;
+                    break;
+                }
+            }
+            
+            colorMap.set(featureId, assignedColorIndex);
+        });
+        
+        return colorMap;
+    }
+    
+    /**
+     * 保存当前所有要素的原始样式
+     */
+    function saveOriginalStyles(features) {
+        AppState.originalStyles.clear();
+        features.forEach(feature => {
+            const featureId = feature.getId();
+            const currentStyle = feature.getStyle();
+            AppState.originalStyles.set(featureId, currentStyle);
+        });
+    }
+    
+    /**
+     * 应用着色到多边形
+     */
+    function applyColoringToFeatures(colorMap) {
+        colorMap.forEach((colorIndex, featureId) => {
+            const feature = vectorSource.getFeatureById(featureId);
+            if (feature) {
+                const color = DISTRICT_COLORS[colorIndex];
+                const name = feature.get('name') || '';
+                
+                const styles = [
+                    new ol.style.Style({
+                        fill: new ol.style.Fill({
+                            color: color.fill
+                        }),
+                        stroke: new ol.style.Stroke({
+                            color: color.stroke,
+                            width: 2
+                        })
+                    })
+                ];
+                
+                // 添加文字标签
+                if (name) {
+                    const geometry = feature.getGeometry();
+                    if (geometry && geometry.getType() === 'Polygon') {
+                        const extent = geometry.getExtent();
+                        const center = ol.extent.getCenter(extent);
+                        
+                        styles.push(
+                            new ol.style.Style({
+                                geometry: new ol.geom.Point(center),
+                                text: new ol.style.Text({
+                                    text: name,
+                                    font: 'bold 14px Arial',
+                                    fill: new ol.style.Fill({
+                                        color: '#2c3e50'
+                                    }),
+                                    stroke: new ol.style.Stroke({
+                                        color: 'white',
+                                        width: 3
+                                    })
+                                })
+                            })
+                        );
+                    }
+                }
+                
+                feature.setStyle(styles);
+            }
+        });
+    }
+    
+    /**
+     * 恢复原始样式
+     */
+    function restoreOriginalStyles() {
+        AppState.originalStyles.forEach((style, featureId) => {
+            const feature = vectorSource.getFeatureById(featureId);
+            if (feature) {
+                if (style) {
+                    feature.setStyle(style);
+                } else {
+                    feature.setStyle(null); // 使用默认样式
+                }
+            }
+        });
+    }
+    
+    /**
+     * 执行学区着色
+     */
+    function colorDistricts() {
+        if (AppState.isColored) {
+            // 如果已经着色，则取消着色
+            restoreOriginalStyles();
+            AppState.isColored = false;
+            AppState.districtColors.clear();
+            $('#colorDistricts').removeClass('active');
+            showMessage('已取消学区着色', 'info');
+            return;
+        }
+        
+        // 获取所有可见的矢量面要素
+        const allFeatures = vectorSource.getFeatures();
+        const polygonFeatures = allFeatures.filter(feature => {
+            const geometry = feature.getGeometry();
+            if (!geometry) return false;
+            
+            const geomType = geometry.getType();
+            // 只处理多边形类型
+            if (geomType !== 'Polygon' && geomType !== 'MultiPolygon') return false;
+            
+            // 检查是否被隐藏
+            const featureFileId = feature.get('sourceFileId');
+            const featureGroupId = feature.get('sourceGroupId');
+            if (featureFileId && featureGroupId) {
+                return !isFileHidden(featureFileId, featureGroupId);
+            }
+            
+            return true;
+        });
+        
+        if (polygonFeatures.length === 0) {
+            showMessage('没有可见的学区多边形可着色', 'warning');
+            return;
+        }
+        
+        console.log(`[着色] 找到 ${polygonFeatures.length} 个可见多边形`);
+        
+        // 保存原始样式
+        saveOriginalStyles(polygonFeatures);
+        
+        // 构建邻接矩阵
+        console.log('[着色] 构建邻接矩阵...');
+        const adjacencyMap = buildAdjacencyMatrix(polygonFeatures);
+        
+        // 统计邻接信息用于调试
+        let adjacencyCount = 0;
+        adjacencyMap.forEach((neighbors, id) => {
+            adjacencyCount += neighbors.length;
+        });
+        console.log(`[着色] 邻接关系数量: ${adjacencyCount / 2} 对`);
+        
+        // 使用贪心算法分配颜色
+        console.log('[着色] 分配颜色...');
+        const colorMap = assignColorsWithGreedyAlgorithm(polygonFeatures, adjacencyMap);
+        
+        // 应用颜色
+        applyColoringToFeatures(colorMap);
+        
+        // 更新状态
+        AppState.isColored = true;
+        AppState.districtColors = colorMap;
+        $('#colorDistricts').addClass('active');
+        
+        // 统计颜色使用情况
+        const colorUsage = {};
+        colorMap.forEach(colorIndex => {
+            colorUsage[DISTRICT_COLORS[colorIndex].name] = (colorUsage[DISTRICT_COLORS[colorIndex].name] || 0) + 1;
+        });
+        console.log('[着色] 颜色使用情况:', colorUsage);
+        
+        showMessage(`学区着色完成！使用 ${Object.keys(colorUsage).length} 种颜色`, 'success');
+    }
+    
+    /**
+     * 刷新着色（在地图数据变化后调用）
+     */
+    function refreshColoring() {
+        if (AppState.isColored) {
+            // 暂时取消着色，然后重新应用
+            AppState.isColored = false;
+            colorDistricts();
+        }
+    }
+    
+    // 绑定着色按钮事件
+    $(document).on('click', '#colorDistricts', function() {
+        colorDistricts();
+    });
+    
+    // 在矢量源变化时，如果处于着色状态，刷新着色
+    vectorSource.on('change', function() {
+        // 延迟执行以确保要素已更新
+        if (AppState.isColored) {
+            setTimeout(() => {
+                refreshColoring();
+            }, 100);
+        }
+    });
+
 })();
