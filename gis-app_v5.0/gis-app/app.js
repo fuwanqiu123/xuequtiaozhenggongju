@@ -7485,7 +7485,9 @@
         { fill: 'rgba(52, 152, 219, 0.5)', stroke: '#2980b9', name: '蓝色' },  // #3498db
         { fill: 'rgba(46, 204, 113, 0.5)', stroke: '#27ae60', name: '绿色' },  // #2ecc71
         { fill: 'rgba(243, 156, 18, 0.5)', stroke: '#d68910', name: '橙色' },  // #f39c12
-        { fill: 'rgba(155, 89, 182, 0.5)', stroke: '#8e44ad', name: '紫色' }   // #9b59b6
+        { fill: 'rgba(155, 89, 182, 0.5)', stroke: '#8e44ad', name: '紫色' },  // #9b59b6
+        { fill: 'rgba(26, 188, 156, 0.5)', stroke: '#16a085', name: '青色' },  // #1abc9c
+        { fill: 'rgba(230, 126, 34, 0.5)', stroke: '#d35400', name: '深橙' }   // #e67e22
     ];
     
     /**
@@ -7522,29 +7524,72 @@
     }
     
     /**
-     * 构建邻接矩阵
-     * 返回一个Map，key是feature id，value是与该feature相邻的所有feature id数组
+     * 按学区文件ID对多边形进行分组
+     * 返回 Map<学区文件ID, 多边形数组>
      */
-    function buildAdjacencyMatrix(features) {
-        const adjacencyMap = new Map();
-        const n = features.length;
+    function groupPolygonsByDistrict(polygonFeatures) {
+        const districtGroups = new Map();
         
-        // 初始化邻接表
-        features.forEach((feature, index) => {
-            const featureId = feature.getId() || `feature_${index}`;
-            feature.setId(featureId);
-            adjacencyMap.set(featureId, []);
+        polygonFeatures.forEach(feature => {
+            const sourceFileId = feature.get('sourceFileId');
+            const sourceFileName = feature.get('sourceFileName') || '未知学区';
+            
+            // 使用学区文件ID作为分组键
+            const districtKey = sourceFileId || `district_${feature.getId()}`;
+            
+            if (!districtGroups.has(districtKey)) {
+                districtGroups.set(districtKey, {
+                    fileId: sourceFileId,
+                    name: sourceFileName,
+                    features: []
+                });
+            }
+            
+            districtGroups.get(districtKey).features.push(feature);
         });
         
-        // 计算所有多边形之间的邻接关系
-        for (let i = 0; i < n; i++) {
-            const featureId1 = features[i].getId();
-            for (let j = i + 1; j < n; j++) {
-                const featureId2 = features[j].getId();
+        return districtGroups;
+    }
+    
+    /**
+     * 判断两个学区是否相邻（任一多边形相邻即为相邻）
+     */
+    function areDistrictsAdjacent(district1, district2) {
+        for (const feature1 of district1.features) {
+            for (const feature2 of district2.features) {
+                if (arePolygonsAdjacent(feature1, feature2)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * 构建学区级别的邻接矩阵
+     * 返回一个Map，key是学区ID，value是与该学区相邻的所有学区ID数组
+     */
+    function buildDistrictAdjacencyMatrix(districtGroups) {
+        const adjacencyMap = new Map();
+        const districtIds = Array.from(districtGroups.keys());
+        
+        // 初始化邻接表
+        districtIds.forEach(districtId => {
+            adjacencyMap.set(districtId, []);
+        });
+        
+        // 计算所有学区之间的邻接关系
+        for (let i = 0; i < districtIds.length; i++) {
+            const districtId1 = districtIds[i];
+            const district1 = districtGroups.get(districtId1);
+            
+            for (let j = i + 1; j < districtIds.length; j++) {
+                const districtId2 = districtIds[j];
+                const district2 = districtGroups.get(districtId2);
                 
-                if (arePolygonsAdjacent(features[i], features[j])) {
-                    adjacencyMap.get(featureId1).push(featureId2);
-                    adjacencyMap.get(featureId2).push(featureId1);
+                if (areDistrictsAdjacent(district1, district2)) {
+                    adjacencyMap.get(districtId1).push(districtId2);
+                    adjacencyMap.get(districtId2).push(districtId1);
                 }
             }
         }
@@ -7553,17 +7598,18 @@
     }
     
     /**
-     * 贪心算法分配颜色
-     * 确保相邻多边形颜色不同
+     * 贪心算法分配颜色给学区
+     * 确保相邻学区颜色不同，同一学区内的所有多边形使用相同颜色
      */
-    function assignColorsWithGreedyAlgorithm(features, adjacencyMap) {
-        const colorMap = new Map();
+    function assignColorsToDistricts(districtGroups, adjacencyMap) {
+        const colorMap = new Map(); // 学区ID -> 颜色索引
         
-        features.forEach(feature => {
-            const featureId = feature.getId();
-            const neighbors = adjacencyMap.get(featureId) || [];
+        const districtIds = Array.from(districtGroups.keys());
+        
+        districtIds.forEach(districtId => {
+            const neighbors = adjacencyMap.get(districtId) || [];
             
-            // 收集相邻多边形已使用的颜色
+            // 收集相邻学区已使用的颜色
             const usedColors = new Set();
             neighbors.forEach(neighborId => {
                 if (colorMap.has(neighborId)) {
@@ -7580,10 +7626,22 @@
                 }
             }
             
-            colorMap.set(featureId, assignedColorIndex);
+            colorMap.set(districtId, assignedColorIndex);
         });
         
-        return colorMap;
+        // 构建多边形级别的颜色映射
+        const polygonColorMap = new Map();
+        districtIds.forEach(districtId => {
+            const colorIndex = colorMap.get(districtId);
+            const district = districtGroups.get(districtId);
+            
+            district.features.forEach(feature => {
+                const featureId = feature.getId();
+                polygonColorMap.set(featureId, colorIndex);
+            });
+        });
+        
+        return { districtColorMap: colorMap, polygonColorMap: polygonColorMap };
     }
     
     /**
@@ -7669,6 +7727,9 @@
     
     /**
      * 执行学区着色
+     * 规则：
+     * 1. 同一个学区的所有多边形使用相同颜色
+     * 2. 相邻的不同学区使用不同颜色
      */
     function colorDistricts() {
         if (AppState.isColored) {
@@ -7711,37 +7772,42 @@
         // 保存原始样式
         saveOriginalStyles(polygonFeatures);
         
-        // 构建邻接矩阵
-        console.log('[着色] 构建邻接矩阵...');
-        const adjacencyMap = buildAdjacencyMatrix(polygonFeatures);
+        // 按学区分组
+        console.log('[着色] 按学区分组...');
+        const districtGroups = groupPolygonsByDistrict(polygonFeatures);
+        console.log(`[着色] 共分为 ${districtGroups.size} 个学区`);
+        
+        // 构建学区级别的邻接矩阵
+        console.log('[着色] 构建学区邻接矩阵...');
+        const districtAdjacencyMap = buildDistrictAdjacencyMatrix(districtGroups);
         
         // 统计邻接信息用于调试
         let adjacencyCount = 0;
-        adjacencyMap.forEach((neighbors, id) => {
+        districtAdjacencyMap.forEach((neighbors, id) => {
             adjacencyCount += neighbors.length;
         });
-        console.log(`[着色] 邻接关系数量: ${adjacencyCount / 2} 对`);
+        console.log(`[着色] 学区邻接关系数量: ${adjacencyCount / 2} 对`);
         
-        // 使用贪心算法分配颜色
-        console.log('[着色] 分配颜色...');
-        const colorMap = assignColorsWithGreedyAlgorithm(polygonFeatures, adjacencyMap);
+        // 使用贪心算法分配颜色给学区
+        console.log('[着色] 为学区分配颜色...');
+        const { districtColorMap, polygonColorMap } = assignColorsToDistricts(districtGroups, districtAdjacencyMap);
         
-        // 应用颜色
-        applyColoringToFeatures(colorMap);
+        // 应用颜色到多边形
+        applyColoringToFeatures(polygonColorMap);
         
         // 更新状态
         AppState.isColored = true;
-        AppState.districtColors = colorMap;
+        AppState.districtColors = polygonColorMap;
         $('#colorDistricts').addClass('active');
         
         // 统计颜色使用情况
         const colorUsage = {};
-        colorMap.forEach(colorIndex => {
+        districtColorMap.forEach(colorIndex => {
             colorUsage[DISTRICT_COLORS[colorIndex].name] = (colorUsage[DISTRICT_COLORS[colorIndex].name] || 0) + 1;
         });
         console.log('[着色] 颜色使用情况:', colorUsage);
         
-        showMessage(`学区着色完成！使用 ${Object.keys(colorUsage).length} 种颜色`, 'success');
+        showMessage(`学区着色完成！共 ${districtGroups.size} 个学区，使用 ${Object.keys(colorUsage).length} 种颜色`, 'success');
     }
     
     /**
