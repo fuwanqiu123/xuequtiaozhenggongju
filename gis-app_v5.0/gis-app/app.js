@@ -266,6 +266,7 @@
                 selectedJSONFile: null,
                 jsonFeatureMap: new Map(),
                 hiddenFiles: new Set(),
+                lockedFiles: new Set(), // 锁定的文件ID集合
                 nextFileId: 1,
                 starredFiles: new Set()
             },
@@ -276,6 +277,7 @@
                 selectedJSONFile: null,
                 jsonFeatureMap: new Map(),
                 hiddenFiles: new Set(),
+                lockedFiles: new Set(), // 锁定的文件ID集合
                 nextFileId: 1,
                 starredFiles: new Set()
             },
@@ -286,6 +288,7 @@
                 selectedJSONFile: null,
                 jsonFeatureMap: new Map(),
                 hiddenFiles: new Set(),
+                lockedFiles: new Set(), // 锁定的文件ID集合
                 nextFileId: 1,
                 starredFiles: new Set()
             }
@@ -309,6 +312,7 @@
         selectedAssistFile: null,
         assistFeatureMap: new Map(),
         hiddenAssistFiles: new Set(),
+        lockedAssistFiles: new Set(), // 锁定的辅助元素文件ID集合
         nextAssistFileId: 1,
         // 侧边栏收缩状态
         sidebarCollapsed: false,
@@ -821,13 +825,15 @@
             
             // 检查是否已标星
             const isStarred = group.starredFiles.has(jsonFile.id);
+            // 检查是否已锁定
+            const isLocked = group.lockedFiles.has(jsonFile.id);
             
             html += `
-                <div class="json-file-item ${isSelected ? 'selected' : ''} ${isHidden ? 'hidden-file' : ''} ${searchClass} ${highlightClass} ${isStarred ? 'starred' : ''}" data-json-id="${jsonFile.id}" data-group-id="${targetGroupId}" data-file-name="${jsonFile.name.toLowerCase()}">
+                <div class="json-file-item ${isSelected ? 'selected' : ''} ${isHidden ? 'hidden-file' : ''} ${searchClass} ${highlightClass} ${isStarred ? 'starred' : ''} ${isLocked ? 'locked' : ''}" data-json-id="${jsonFile.id}" data-group-id="${targetGroupId}" data-file-name="${jsonFile.name.toLowerCase()}">
                     <div class="json-file-main">
                         <div class="json-file-info">
                             <div class="json-file-name" title="${jsonFile.name}">
-                                ${isStarred ? '<i class="fas fa-star star-icon"></i> ' : ''}${jsonFile.name}
+                                ${isStarred ? '<i class="fas fa-star star-icon"></i> ' : ''}${isLocked ? '<i class="fas fa-lock lock-icon"></i> ' : ''}${jsonFile.name}
                             </div>
                             <div class="json-file-meta">${featureCount} 个图形 · ${jsonFile.importTime}</div>
                         </div>
@@ -837,10 +843,13 @@
                         <button class="btn-star ${isStarred ? 'starred' : ''}" data-json-id="${jsonFile.id}" data-group-id="${targetGroupId}" title="${isStarred ? '取消标星' : '标星该学区'}">
                             <i class="fas ${isStarred ? 'fa-star' : 'fa-star-o'}"></i> ${isStarred ? '已标星' : '标星'}
                         </button>
+                        <button class="btn-lock ${isLocked ? 'locked-state' : ''}" data-json-id="${jsonFile.id}" data-group-id="${targetGroupId}" title="${isLocked ? '解锁该文件（可编辑）' : '锁定该文件（不可编辑）'}">
+                            <i class="fas ${isLocked ? 'fa-lock' : 'fa-unlock'}"></i> ${isLocked ? '已锁定' : '锁定'}
+                        </button>
                         <button class="btn-visibility ${isHidden ? 'hidden-state' : ''}" data-json-id="${jsonFile.id}" data-group-id="${targetGroupId}" title="${isHidden ? '显示该文件' : '隐藏该文件'}">
                             <i class="fas ${isHidden ? 'fa-eye-slash' : 'fa-eye'}"></i>
                         </button>
-                        <button class="btn-clear" data-json-id="${jsonFile.id}" data-group-id="${targetGroupId}" title="清除该文件中的所有图形">
+                        <button class="btn-clear" data-json-id="${jsonFile.id}" data-group-id="${targetGroupId}" title="清除该文件中的所有图形" ${isLocked ? 'disabled' : ''}>
                             <i class="fas fa-eraser"></i> 清除
                         </button>
                         <button class="btn-remove" data-json-id="${jsonFile.id}" data-group-id="${targetGroupId}" title="删除该文件及其所有图形">
@@ -880,6 +889,14 @@
             const jsonId = $(this).data('json-id');
             const grpId = $(this).data('group-id');
             toggleFileStar(jsonId, grpId);
+        });
+        
+        // 绑定锁定/解锁按钮事件
+        $jsonFileList.off('click', '.btn-lock').on('click', '.btn-lock', function(e) {
+            e.stopPropagation();
+            const jsonId = $(this).data('json-id');
+            const grpId = $(this).data('group-id');
+            toggleFileLock(jsonId, grpId);
         });
         
         // 绑定隐藏/显示按钮事件
@@ -951,6 +968,36 @@
         
         // 更新本组全部隐藏按钮状态
         updateToggleGroupButton(grpId);
+    }
+    
+    // 切换文件锁定状态
+    function toggleFileLock(jsonId, groupId = null) {
+        const grpId = groupId || AppState.currentGroup;
+        const group = AppState.groups[grpId];
+        const jsonFile = group.jsonFiles.find(f => f.id === jsonId);
+        if (!jsonFile) return;
+        
+        if (group.lockedFiles.has(jsonId)) {
+            group.lockedFiles.delete(jsonId);
+            showMessage(`已解锁文件: ${jsonFile.name}，现在可以编辑`, 'success');
+        } else {
+            group.lockedFiles.add(jsonId);
+            showMessage(`已锁定文件: ${jsonFile.name}，无法编辑`, 'info');
+            // 如果当前正在编辑该文件中的要素，取消选择
+            const selectedFeatures = selectInteraction.getFeatures();
+            const featuresToRemove = [];
+            selectedFeatures.forEach(feature => {
+                const featureFileId = feature.get('fileId');
+                if (featureFileId === jsonId) {
+                    featuresToRemove.push(feature);
+                }
+            });
+            featuresToRemove.forEach(feature => selectedFeatures.remove(feature));
+        }
+        
+        // 更新文件列表显示
+        const searchTerm = $(`.fileSearchInput[data-group="${grpId}"]`).val();
+        updateJSONFileList(grpId, searchTerm);
     }
     
     // 切换本组所有文件的可见性
@@ -1161,6 +1208,9 @@
             if (textCount > 0) detailInfo.push(`文字${textCount}`);
             if (pointCount > 0) detailInfo.push(`点${pointCount}`);
             
+            // 检查是否已锁定
+            const isLocked = AppState.lockedAssistFiles.has(assistFile.id);
+            
             // 默认图层不显示移除按钮
             const isDefaultLayer = assistFile.isDefault === true;
             const removeButton = isDefaultLayer ? '' : `
@@ -1170,10 +1220,10 @@
             `;
             
             html += `
-                <div class="assist-file-item ${isSelected ? 'selected' : ''} ${isHidden ? 'hidden-file' : ''} ${searchClass} ${highlightClass} ${isDefaultLayer ? 'default-layer' : ''}" data-assist-id="${assistFile.id}" data-file-name="${assistFile.name.toLowerCase()}">
+                <div class="assist-file-item ${isSelected ? 'selected' : ''} ${isHidden ? 'hidden-file' : ''} ${searchClass} ${highlightClass} ${isDefaultLayer ? 'default-layer' : ''} ${isLocked ? 'locked' : ''}" data-assist-id="${assistFile.id}" data-file-name="${assistFile.name.toLowerCase()}">
                     <div class="assist-file-main">
                         <div class="assist-file-info">
-                            <div class="assist-file-name" title="${assistFile.name}">${isDefaultLayer ? '<i class="fas fa-layer-group" style="color:#3498db;"></i> ' : ''}${assistFile.name}</div>
+                            <div class="assist-file-name" title="${assistFile.name}">${isDefaultLayer ? '<i class="fas fa-layer-group" style="color:#3498db;"></i> ' : ''}${isLocked ? '<i class="fas fa-lock lock-icon"></i> ' : ''}${assistFile.name}</div>
                             <div class="assist-file-meta">${detailInfo.join(' · ')} · ${assistFile.importTime}</div>
                         </div>
                         <div class="assist-file-count">${featureCount}</div>
@@ -1181,6 +1231,9 @@
                     <div class="assist-file-actions-row">
                         <button class="btn-locate" data-assist-id="${assistFile.id}" title="定位到该文件">
                             <i class="fas fa-crosshairs"></i> 定位
+                        </button>
+                        <button class="btn-lock ${isLocked ? 'locked-state' : ''}" data-assist-id="${assistFile.id}" title="${isLocked ? '解锁该文件（可编辑）' : '锁定该文件（不可编辑）'}">
+                            <i class="fas ${isLocked ? 'fa-lock' : 'fa-unlock'}"></i> ${isLocked ? '已锁定' : '锁定'}
                         </button>
                         <button class="btn-visibility ${isHidden ? 'hidden-state' : ''}" data-assist-id="${assistFile.id}" title="${isHidden ? '显示该文件' : '隐藏该文件'}">
                             <i class="fas ${isHidden ? 'fa-eye-slash' : 'fa-eye'}"></i>
@@ -1220,6 +1273,13 @@
             e.stopPropagation();
             const assistId = $(this).data('assist-id');
             locateAssistFile(assistId);
+        });
+        
+        // 绑定锁定/解锁按钮事件
+        $assistFileList.off('click', '.btn-lock').on('click', '.btn-lock', function(e) {
+            e.stopPropagation();
+            const assistId = $(this).data('assist-id');
+            toggleAssistFileLock(assistId);
         });
         
         // 绑定隐藏/显示按钮事件
@@ -1315,6 +1375,33 @@
         
         updateAssistFileList($('#assistFileSearchInput').val());
         updateToggleAllAssistButton();
+    }
+    
+    // 切换辅助元素文件锁定状态
+    function toggleAssistFileLock(assistId) {
+        const assistFile = AppState.assistFiles.find(f => f.id === assistId);
+        if (!assistFile) return;
+        
+        if (AppState.lockedAssistFiles.has(assistId)) {
+            AppState.lockedAssistFiles.delete(assistId);
+            showMessage(`已解锁辅助文件: ${assistFile.name}，现在可以编辑`, 'success');
+        } else {
+            AppState.lockedAssistFiles.add(assistId);
+            showMessage(`已锁定辅助文件: ${assistFile.name}，无法编辑`, 'info');
+            // 如果当前正在编辑该文件中的要素，取消选择
+            const selectedFeatures = assistSelectInteraction.getFeatures();
+            const featuresToRemove = [];
+            selectedFeatures.forEach(feature => {
+                const featureFileId = feature.get('assistFileId');
+                if (featureFileId === assistId) {
+                    featuresToRemove.push(feature);
+                }
+            });
+            featuresToRemove.forEach(feature => selectedFeatures.remove(feature));
+        }
+        
+        // 更新文件列表显示
+        updateAssistFileList($('#assistFileSearchInput').val());
     }
     
     // 切换所有辅助元素文件的可见性
@@ -1656,6 +1743,13 @@
         const group = AppState.groups[groupId];
         // 如果全局所有组都被隐藏，或者该文件在组内被隐藏
         return AppState.allGroupsHidden || group.hiddenFiles.has(fileId);
+    }
+    
+    // 检查文件是否被锁定
+    function isFileLocked(fileId, groupId) {
+        const group = AppState.groups[groupId];
+        if (!group) return false;
+        return group.lockedFiles.has(fileId);
     }
     
     // 清除JSON文件中的所有图形（保留文件）
@@ -2400,11 +2494,10 @@
     
     // ========== 交互初始化 ==========
     function initInteractions() {
-        // 选择交互 - 允许选择所有可见的学区多边形（不限于当前组）
+        // 选择交互 - 允许选择所有可见的学区多边形（不限于当前组），但排除锁定的文件
         selectInteraction = new ol.interaction.Select({
             layers: [window.mapLayers.vectorLayer],
             filter: function(feature, layer) {
-                // 只过滤掉被隐藏的要素，允许选择任何可见的学区多边形
                 const featureFileId = feature.get('sourceFileId');
                 const featureGroupId = feature.get('sourceGroupId');
                 
@@ -2415,6 +2508,11 @@
                 
                 // 检查文件是否被隐藏
                 if (isFileHidden(featureFileId, featureGroupId)) {
+                    return false;
+                }
+                
+                // 检查文件是否被锁定 - 锁定的文件无法被选中
+                if (isFileLocked(featureFileId, featureGroupId)) {
                     return false;
                 }
                 
@@ -2989,9 +3087,17 @@
     
     // ========== 辅助要素选择交互 ==========
     function initAssistSelectInteraction() {
-        // 创建辅助要素选择交互
+        // 创建辅助要素选择交互 - 过滤掉锁定的文件中的要素
         assistSelectInteraction = new ol.interaction.Select({
             layers: [window.mapLayers.lineLayer, window.mapLayers.assistPolygonLayer, window.mapLayers.assistTextLayer, window.mapLayers.assistPointLayer],
+            filter: function(feature, layer) {
+                // 检查要素是否属于锁定的文件
+                const assistFileId = feature.get('assistFileId');
+                if (assistFileId && AppState.lockedAssistFiles.has(assistFileId)) {
+                    return false; // 锁定的文件中的要素无法被选中
+                }
+                return true;
+            },
             style: function(feature) {
                 const geometryType = feature.getGeometry().getType();
                 
@@ -4504,6 +4610,10 @@
                     AppState.assistFiles.push(assistFile);
                     AppState.assistFeatureMap.set(fileId, importedFeatures);
                     
+                    // 导入的辅助元素文件默认锁定
+                    AppState.lockedAssistFiles.add(fileId);
+                    console.log(`导入的辅助元素文件自动锁定: ${assistFile.name}`);
+                    
                     // 更新列表并选中新文件
                     updateAssistFileList();
                     selectAssistFile(fileId);
@@ -5359,6 +5469,13 @@
                     jsonFile.featureCount = importedFeatures.length;
                     group.jsonFiles.push(jsonFile);
                     group.jsonFeatureMap.set(fileId, importedFeatures);
+                    
+                    // 导入的文件夹中的文件默认锁定
+                    const isFirstFileOfFirstGroup = (grpId === 1 && group.jsonFiles.length === 1);
+                    if (!isFirstFileOfFirstGroup) {
+                        group.lockedFiles.add(fileId);
+                    }
+                    
                     importedCount++;
                     
                 } catch (error) {
@@ -5557,6 +5674,13 @@
                 jsonFile.featureCount = successCount;
                 group.jsonFiles.push(jsonFile);
                 group.jsonFeatureMap.set(fileId, importedFeatures);
+                
+                // 导入的学区文件默认锁定（只有第一组的第一个文件且是默认创建时非锁定）
+                const isFirstFileOfFirstGroup = (grpId === 1 && group.jsonFiles.length === 1);
+                if (!isFirstFileOfFirstGroup) {
+                    group.lockedFiles.add(fileId);
+                    console.log(`导入的学区文件自动锁定: ${jsonFile.name} (组${grpId})`);
+                }
                 
                 // 更新文件列表并选中新导入的文件
                 const searchTerm = $(`.fileSearchInput[data-group="${grpId}"]`).val();
@@ -7088,6 +7212,15 @@
         group.jsonFiles.push(jsonFile);
         group.jsonFeatureMap.set(fileId, []);
         
+        // 默认锁定规则：只有第一组的第一个文件是非锁定状态，其他全部锁定
+        const isFirstFileOfFirstGroup = (groupId === 1 && group.jsonFiles.length === 1);
+        if (!isFirstFileOfFirstGroup) {
+            group.lockedFiles.add(fileId);
+            console.log(`新创建的文件自动锁定: ${jsonFile.name} (组${groupId})`);
+        } else {
+            console.log(`第一组的第一个文件保持解锁: ${jsonFile.name}`);
+        }
+        
         // 如果是当前组，更新列表显示
         if (groupId === AppState.currentGroup) {
             const searchTerm = $(`.fileSearchInput[data-group="${groupId}"]`).val();
@@ -7102,7 +7235,7 @@
             selectJSONFile(fileId, groupId);
         }
         
-        console.log(`创建新学区文件: ${jsonFile.name}, ID: ${fileId}, 组: ${groupId}`);
+        console.log(`创建新学区文件: ${jsonFile.name}, ID: ${fileId}, 组: ${groupId}, 锁定: ${!isFirstFileOfFirstGroup}`);
         
         return jsonFile;
     }

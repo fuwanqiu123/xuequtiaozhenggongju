@@ -646,6 +646,16 @@ body {
     text-decoration: line-through;
 }
 
+/* 辅助元素文件锁定状态 */
+.assist-file-item.locked {
+    background: #fef2f2;
+    border-left: 4px solid #dc2626;
+}
+
+.assist-file-item.locked:hover {
+    background: #fee2e2;
+}
+
 .assist-file-main {
     display: flex;
     justify-content: space-between;
@@ -774,6 +784,24 @@ body {
 
 .assist-file-actions-row .btn-remove:hover {
     background: #dc3545;
+    color: white;
+}
+
+/* 辅助元素锁定按钮 */
+.assist-file-actions-row .btn-lock {
+    flex: 1;
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #dc2626 !important;
+}
+
+.assist-file-actions-row .btn-lock:hover {
+    background: #dc2626;
+    color: white;
+}
+
+.assist-file-actions-row .btn-lock.locked-state {
+    background: #dc2626;
     color: white;
 }
 
@@ -1139,6 +1167,47 @@ body {
 .btn-star.starred {
     background: #f59e0b;
     color: white;
+}
+
+/* 锁定状态 */
+.json-file-item.locked {
+    background: #fef2f2;
+    border-left: 4px solid #dc2626;
+}
+
+.json-file-item.locked:hover {
+    background: #fee2e2;
+}
+
+.lock-icon {
+    color: #dc2626;
+    margin-right: 5px;
+}
+
+/* 锁定按钮 */
+.btn-lock {
+    flex: 1;
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #dc2626 !important;
+}
+
+.btn-lock:hover {
+    background: #dc2626;
+    color: white;
+}
+
+.btn-lock.locked-state {
+    background: #dc2626;
+    color: white;
+}
+
+/* 禁用状态的清除按钮 */
+.json-file-item .btn-clear:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: #e5e7eb;
+    color: #9ca3af;
 }
 
 .json-file-item:last-child {
