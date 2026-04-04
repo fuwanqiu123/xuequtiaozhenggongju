@@ -16,6 +16,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
     <!-- 本地样式 -->
     <link rel="stylesheet" href="style.css">
+    <!-- 图片配准工具样式 -->
+    <link rel="stylesheet" href="image-overlay.css">
     <script>
         // 资源加载错误处理
         window.resourceLoadError = function(resourceName) {
@@ -372,6 +374,15 @@
                         <i class="fas fa-palette"></i>
                     </button>
                 </div>
+                
+                <div class="toolbar-divider"></div>
+                
+                <!-- 图片配准工具 -->
+                <div class="toolbar-group">
+                    <button id="imageOverlayTool" title="图片配准工具 - 导入社区平面图">
+                        <i class="fas fa-image"></i>
+                    </button>
+                </div>
             </div>
             
             <!-- 地图控制按钮 -->
@@ -460,6 +471,7 @@
         </div>
     </div>
 
+    <script src="image-overlay.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

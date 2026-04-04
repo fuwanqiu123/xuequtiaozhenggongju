@@ -2312,6 +2312,13 @@
                 view: view
             });
             
+            // 禁用Shift+DragZoom交互（避免与图片配准拖拽冲突）
+            map.getInteractions().forEach(function(interaction) {
+                if (interaction instanceof ol.interaction.DragZoom) {
+                    map.removeInteraction(interaction);
+                }
+            });
+            
             // 存储图层引用
             window.mapLayers = {
                 vecLayer: vecLayer,
@@ -6892,6 +6899,15 @@
         // 数据管理
         $('#exportGeoJSON').on('click', exportToGeoJSON);
         
+        // 图片配准工具按钮
+        $('#imageOverlayTool').on('click', function() {
+            if (window.ImageOverlayManager) {
+                window.ImageOverlayManager.show();
+            } else {
+                showMessage('图片配准模块未加载', 'error');
+            }
+        });
+        
         // 搜索功能
         $('#searchBtn').on('click', searchPlace);
         $('#searchInput').on('keypress', function(e) {
@@ -7272,6 +7288,12 @@
         try {
             initMap();
             LoadingManager.update('map', 80);
+            
+            // 初始化图片配准管理器
+            if (window.ImageOverlayManager && map) {
+                window.ImageOverlayManager.init(map);
+                console.log('[初始化] 图片配准管理器已加载');
+            }
         } catch (error) {
             console.error('地图初始化失败:', error);
             LoadingManager.showError('地图初始化失败: ' + error.message);
