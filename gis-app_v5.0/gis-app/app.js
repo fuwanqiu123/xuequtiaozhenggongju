@@ -326,7 +326,11 @@
         // 学区着色状态
         isColored: false,
         districtColors: new Map(), // 存储每个学区的颜色
-        originalStyles: new Map()  // 存储原始样式以便恢复
+        originalStyles: new Map(),  // 存储原始样式以便恢复
+        // 识别模式状态
+        identifyMode: false,
+        identifyClickListener: null,
+        identifyMarker: null
     };
     
     // 获取当前组的状态
@@ -422,6 +426,8 @@
             modeText = '测距模式';
         } else if (AppState.measureMode === 'area') {
             modeText = '测面模式';
+        } else if (AppState.identifyMode) {
+            modeText = '识别模式';
         } else {
             const modeMap = {
                 'browse': '浏览',
@@ -5030,7 +5036,7 @@
     
     function updateToolbarButtons() {
         // 重置所有按钮状态
-        $('#drawPolygon, #drawAssistLine, #drawAssistPolygon, #drawAssistText, #drawAssistPoint, #selectPolygon, #editPolygon, #selectAssistFeature, #editAssistPolygon, #measureLength, #measureArea').removeClass('active');
+        $('#drawPolygon, #drawAssistLine, #drawAssistPolygon, #drawAssistText, #drawAssistPoint, #selectPolygon, #editPolygon, #selectAssistFeature, #editAssistPolygon, #measureLength, #measureArea, #identifyDistricts').removeClass('active');
         
         // 设置当前激活的按钮
         if (AppState.currentMode === 'drawPolygon') {
@@ -5058,6 +5064,11 @@
             $('#measureLength').addClass('active');
         } else if (AppState.measureMode === 'area') {
             $('#measureArea').addClass('active');
+        }
+        
+        // 识别按钮状态
+        if (AppState.identifyMode) {
+            $('#identifyDistricts').addClass('active');
         }
     }
     
@@ -6351,6 +6362,269 @@
         showMessage('已清除所有测量结果', 'info');
     }
 
+    // ========== 识别功能 - 查询点落在哪些学区内 ==========
+    
+    // 开始识别模式
+    function startIdentifyMode() {
+        if (AppState.identifyMode) {
+            stopIdentifyMode();
+            return;
+        }
+        
+        // 停止其他模式
+        stopDrawing();
+        stopMeasure();
+        
+        AppState.identifyMode = true;
+        
+        // 改变鼠标样式
+        $(map.getViewport()).addClass('identify-cursor');
+        
+        // 绑定点击事件
+        AppState.identifyClickListener = function(evt) {
+            const coordinate = evt.coordinate;
+            identifyDistrictsAtPoint(coordinate);
+        };
+        map.on('singleclick', AppState.identifyClickListener);
+        
+        updateToolbarButtons();
+        updateStatus();
+        showMessage('识别模式：点击地图查询所在学区', 'info');
+    }
+    
+    // 停止识别模式
+    function stopIdentifyMode() {
+        AppState.identifyMode = false;
+        
+        // 恢复鼠标样式
+        $(map.getViewport()).removeClass('identify-cursor');
+        
+        // 移除点击事件
+        if (AppState.identifyClickListener) {
+            map.un('singleclick', AppState.identifyClickListener);
+            AppState.identifyClickListener = null;
+        }
+        
+        // 清除识别标记
+        clearIdentifyMarker();
+        
+        updateToolbarButtons();
+        updateStatus();
+    }
+    
+    // 清除识别标记
+    function clearIdentifyMarker() {
+        if (AppState.identifyMarker) {
+            vectorSource.removeFeature(AppState.identifyMarker);
+            AppState.identifyMarker = null;
+        }
+        // 移除识别结果弹窗
+        $('.identify-result-popup').remove();
+    }
+    
+    // 识别指定点所在的所有学区
+    function identifyDistrictsAtPoint(coordinate) {
+        // 清除之前的标记和弹窗
+        clearIdentifyMarker();
+        
+        // 添加点击点标记
+        const markerFeature = new ol.Feature({
+            geometry: new ol.geom.Point(coordinate),
+            type: 'identifyMarker'
+        });
+        markerFeature.setStyle(new ol.style.Style({
+            image: new ol.style.Circle({
+                radius: 8,
+                fill: new ol.style.Fill({
+                    color: '#e74c3c'
+                }),
+                stroke: new ol.style.Stroke({
+                    color: 'white',
+                    width: 2
+                })
+            })
+        }));
+        vectorSource.addFeature(markerFeature);
+        AppState.identifyMarker = markerFeature;
+        
+        // 将坐标转换为EPSG:4326（WGS84）供turf使用
+        const lonLat = ol.proj.toLonLat(coordinate);
+        const point = turf.point(lonLat);
+        
+        // 收集所有包含该点的学区
+        const containingDistricts = [];
+        
+        // 遍历所有组的所有多边形
+        [1, 2, 3].forEach(groupId => {
+            const group = AppState.groups[groupId];
+            
+            // 获取该组所有可见的多边形要素
+            const allFeatures = vectorSource.getFeatures();
+            const groupFeatures = allFeatures.filter(feature => {
+                const featureGroupId = feature.get('sourceGroupId');
+                const featureFileId = feature.get('sourceFileId');
+                
+                // 只处理当前组的多边形
+                if (featureGroupId !== groupId) return false;
+                
+                // 检查几何类型
+                const geometry = feature.getGeometry();
+                if (!geometry) return false;
+                const geomType = geometry.getType();
+                if (geomType !== 'Polygon' && geomType !== 'MultiPolygon') return false;
+                
+                // 检查文件是否被隐藏
+                if (featureFileId && isFileHidden(featureFileId, groupId)) return false;
+                
+                return true;
+            });
+            
+            // 检查每个多边形是否包含该点
+            groupFeatures.forEach(feature => {
+                try {
+                    // 转换为GeoJSON格式供turf使用
+                    const format = new ol.format.GeoJSON();
+                    const geojson = format.writeFeatureObject(feature, {
+                        featureProjection: 'EPSG:3857',
+                        dataProjection: 'EPSG:4326'
+                    });
+                    
+                    // 使用turf检查点是否在多边形内
+                    if (turf.booleanPointInPolygon(point, geojson.geometry)) {
+                        const fileId = feature.get('sourceFileId');
+                        const fileName = feature.get('sourceFileName') || '未知学区';
+                        const polygonName = feature.get('name') || '';
+                        
+                        // 查找文件信息
+                        const jsonFile = group.jsonFiles.find(f => f.id === fileId);
+                        const displayName = jsonFile ? jsonFile.name : fileName;
+                        
+                        // 避免重复添加同一文件
+                        const exists = containingDistricts.some(d => 
+                            d.fileId === fileId && d.groupId === groupId
+                        );
+                        
+                        if (!exists) {
+                            containingDistricts.push({
+                                fileId: fileId,
+                                groupId: groupId,
+                                groupName: group.name,
+                                fileName: displayName,
+                                polygonName: polygonName
+                            });
+                        }
+                    }
+                } catch (e) {
+                    console.warn('识别时出错:', e);
+                }
+            });
+        });
+        
+        // 显示识别结果
+        showIdentifyResult(coordinate, containingDistricts);
+    }
+    
+    // 显示识别结果弹窗
+    function showIdentifyResult(coordinate, districts) {
+        // 移除已存在的弹窗
+        $('.identify-result-popup').remove();
+        
+        // 构建弹窗内容
+        const popup = document.createElement('div');
+        popup.className = 'identify-result-popup';
+        
+        let content = '';
+        if (districts.length === 0) {
+            content = `
+                <div class="identify-popup-header">
+                    <span><i class="fas fa-crosshairs"></i> 识别结果</span>
+                    <button class="identify-popup-close" title="关闭"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="identify-popup-body">
+                    <div class="identify-no-result">
+                        <i class="fas fa-info-circle"></i>
+                        <p>该点不在任何学区内</p>
+                    </div>
+                </div>
+            `;
+        } else {
+            // 按分组组织结果
+            const groupedByGroup = {};
+            districts.forEach(d => {
+                if (!groupedByGroup[d.groupId]) {
+                    groupedByGroup[d.groupId] = {
+                        groupName: d.groupName,
+                        districts: []
+                    };
+                }
+                groupedByGroup[d.groupId].districts.push(d);
+            });
+            
+            let listHtml = '';
+            Object.keys(groupedByGroup).forEach(groupId => {
+                const group = groupedByGroup[groupId];
+                listHtml += `
+                    <div class="identify-group">
+                        <div class="identify-group-title">
+                            <i class="fas fa-folder"></i> ${group.groupName}
+                        </div>
+                        <ul class="identify-district-list">
+                            ${group.districts.map(d => `
+                                <li class="identify-district-item">
+                                    <i class="fas fa-map-marker-alt"></i>
+                                    <span class="district-name">${d.fileName}</span>
+                                    ${d.polygonName ? `<span class="polygon-name">(${d.polygonName})</span>` : ''}
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                `;
+            });
+            
+            content = `
+                <div class="identify-popup-header">
+                    <span><i class="fas fa-crosshairs"></i> 识别结果 - 共找到 ${districts.length} 个学区</span>
+                    <button class="identify-popup-close" title="关闭"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="identify-popup-body">
+                    ${listHtml}
+                </div>
+            `;
+        }
+        
+        popup.innerHTML = content;
+        document.body.appendChild(popup);
+        
+        // 定位弹窗到点击位置
+        const pixel = map.getPixelFromCoordinate(coordinate);
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        const popupWidth = 300;
+        const popupHeight = Math.min(400, popup.offsetHeight || 200);
+        
+        let left = pixel[0] + 15;
+        let top = pixel[1] + 15;
+        
+        // 边界检查
+        if (left + popupWidth > viewportWidth) {
+            left = pixel[0] - popupWidth - 15;
+        }
+        if (top + popupHeight > viewportHeight) {
+            top = pixel[1] - popupHeight - 15;
+        }
+        
+        popup.style.left = left + 'px';
+        popup.style.top = top + 'px';
+        
+        // 绑定关闭按钮事件
+        popup.querySelector('.identify-popup-close').addEventListener('click', function() {
+            popup.remove();
+            clearIdentifyMarker();
+        });
+        
+        // 点击弹窗外部不关闭，需要点击关闭按钮或再次点击识别按钮
+    }
+
     // ========== 地图控制 ==========
     function zoomIn() {
         if (map) {
@@ -6895,6 +7169,16 @@
             }
         });
         $('#clearMeasure').on('click', clearMeasureResults);
+        
+        // 识别工具
+        $('#identifyDistricts').on('click', function() {
+            if (AppState.identifyMode) {
+                stopIdentifyMode();
+                showMessage('已退出识别模式', 'info');
+            } else {
+                startIdentifyMode();
+            }
+        });
         
         // 数据管理
         $('#exportGeoJSON').on('click', exportToGeoJSON);

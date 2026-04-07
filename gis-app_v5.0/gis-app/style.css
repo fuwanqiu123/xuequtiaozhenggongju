@@ -2444,3 +2444,167 @@ body {
 .tour-start-btn.hidden {
     display: none;
 }
+
+/* ========== 识别功能样式 ========== */
+
+/* 识别模式鼠标样式 */
+.identify-cursor {
+    cursor: crosshair !important;
+}
+
+/* 识别结果弹窗 */
+.identify-result-popup {
+    position: fixed;
+    z-index: 9999;
+    min-width: 280px;
+    max-width: 350px;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    animation: identifyPopupSlideIn 0.3s ease;
+    overflow: hidden;
+}
+
+@keyframes identifyPopupSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.identify-popup-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 15px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.identify-popup-header span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.identify-popup-close {
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: white;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.identify-popup-close:hover {
+    background: rgba(255, 255, 255, 0.4);
+    transform: rotate(90deg);
+}
+
+.identify-popup-body {
+    max-height: 350px;
+    overflow-y: auto;
+    padding: 15px;
+}
+
+.identify-no-result {
+    text-align: center;
+    padding: 30px 20px;
+    color: #7f8c8d;
+}
+
+.identify-no-result i {
+    font-size: 36px;
+    margin-bottom: 10px;
+    display: block;
+    color: #bdc3c7;
+}
+
+.identify-no-result p {
+    font-size: 14px;
+    margin: 0;
+}
+
+.identify-group {
+    margin-bottom: 15px;
+}
+
+.identify-group:last-child {
+    margin-bottom: 0;
+}
+
+.identify-group-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #34495e;
+    padding: 8px 10px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.identify-group-title i {
+    color: #f39c12;
+}
+
+.identify-district-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.identify-district-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    border-left: 3px solid #3498db;
+    transition: all 0.2s ease;
+}
+
+.identify-district-item:hover {
+    background: #e8f4f8;
+    transform: translateX(3px);
+}
+
+.identify-district-item i {
+    color: #e74c3c;
+    font-size: 14px;
+}
+
+.identify-district-item .district-name {
+    flex: 1;
+    font-size: 14px;
+    color: #2c3e50;
+    font-weight: 500;
+}
+
+.identify-district-item .polygon-name {
+    font-size: 12px;
+    color: #7f8c8d;
+    font-style: italic;
+}
+
+/* 识别按钮激活状态 */
+#identifyDistricts.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.5);
+}
