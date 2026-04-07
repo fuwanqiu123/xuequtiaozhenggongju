@@ -1866,6 +1866,127 @@
         showMessage(`已移除学区 "${jsonFile.name}"`, 'success');
     }
     
+    // ========== 天地图源创建（支持KEY轮询）==========
+    function createTiandituSource(layerType) {
+        const layerMap = {
+            'vec': 'vec_w',      // 矢量底图
+            'cva': 'cva_w',      // 矢量注记
+            'img': 'img_w',      // 影像底图
+            'cia': 'cia_w'       // 影像注记
+        };
+        
+        const layerName = layerMap[layerType] || layerType;
+        let key = TiandituKeyManager.getCurrentKey();
+        
+        // 记录使用量，并在接近上限时自动轮换
+        key = TiandituKeyManager.recordUsage(key);
+        
+        // 使用urls数组形式，支持多个子域
+        const urls = [];
+        for (let i = 0; i <= 7; i++) {
+            urls.push(`https://t${i}.tianditu.gov.cn/${layerName}/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layerType}&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${key}`);
+        }
+        
+        const source = new ol.source.XYZ({
+            urls: urls,
+            attributions: '© 天地图'
+        });
+        
+        // 监听瓦片加载错误，自动轮换Key
+        let errorCount = 0;
+        const MAX_ERRORS = 5; // 连续错误5次后切换Key
+        
+        source.on('tileloaderror', function(event) {
+            errorCount++;
+            console.warn(`[天地图] 瓦片加载错误 (${errorCount}/${MAX_ERRORS}):`, event.tile.getKey());
+            
+            if (errorCount >= MAX_ERRORS) {
+                console.warn('[天地图] 连续多次加载失败，触发Key轮换');
+                errorCount = 0;
+                
+                // 切换到下一个Key并刷新所有图层
+                const newKey = TiandituKeyManager.getNextKey();
+                if (newKey) {
+                    showMessage('天地图Key已自动轮换，继续加载...', 'info');
+                    
+                    // 延迟刷新，避免频繁切换
+                    setTimeout(function() {
+                        refreshTiandituSources();
+                    }, 1000);
+                }
+            }
+        });
+        
+        source.on('tileloadend', function() {
+            // 加载成功时重置错误计数
+            if (errorCount > 0) {
+                errorCount = 0;
+            }
+        });
+        
+        return source;
+    }
+    
+    // 刷新所有天地图源（KEY切换后调用）
+    function refreshTiandituSources() {
+        // 获取地图的所有图层
+        const layers = map.getLayers().getArray();
+        
+        layers.forEach(function(layer) {
+            if (layer instanceof ol.layer.Tile) {
+                const source = layer.getSource();
+                if (source instanceof ol.source.XYZ) {
+                    // 根据图层可见性判断类型
+                    if (layer.get('name') === 'vec') {
+                        layer.setSource(createTiandituSource('vec'));
+                    } else if (layer.get('name') === 'cva') {
+                        layer.setSource(createTiandituSource('cva'));
+                    } else if (layer.get('name') === 'img') {
+                        layer.setSource(createTiandituSource('img'));
+                    } else if (layer.get('name') === 'cia') {
+                        layer.setSource(createTiandituSource('cia'));
+                    }
+                }
+            }
+        });
+        
+        console.log('[地图源] 已刷新天地图瓦片源');
+    }
+    
+    // 手动轮换到下一个天地图Key
+    function rotateTiandituKey() {
+        const oldKey = TiandituKeyManager.getCurrentKey();
+        const newKey = TiandituKeyManager.getNextKey();
+        
+        console.log('[KEY轮换] 手动触发');
+        console.log('[KEY轮换] 旧Key:', oldKey.substring(0, 8) + '...');
+        console.log('[KEY轮换] 新Key:', newKey.substring(0, 8) + '...');
+        
+        // 刷新地图源
+        refreshTiandituSources();
+        
+        // 显示状态
+        const status = TiandituKeyManager.getStatus();
+        showMessage(`Key已轮换 (${status.currentIndex + 1}/${status.totalKeys})`, 'info');
+        
+        return status;
+    }
+    
+    // 查看天地图Key使用状态
+    function checkTiandituKeyStatus() {
+        const status = TiandituKeyManager.getStatus();
+        
+        console.log('===== 天地图Key状态 =====');
+        console.log(`总Key数: ${status.totalKeys}`);
+        console.log(`当前Key索引: ${status.currentIndex + 1}`);
+        console.log(`当前Key: ${status.currentKey}`);
+        console.log(`已失效Key数: ${status.failedCount}`);
+        console.log('使用统计:', status.usageStats);
+        console.log('========================');
+        
+        return status;
+    }
+    
     // ========== 地图初始化 ==========
     function initMap() {
         console.log('初始化地图...');
@@ -1877,40 +1998,32 @@
             
             // 天地图图层 - 矢量地图
             const vecLayer = new ol.layer.Tile({
-                source: new ol.source.XYZ({
-                    url: `https://t0.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TiandituKeyManager.getCurrentKey()}`,
-                    attributions: '© 天地图'
-                }),
+                source: createTiandituSource('vec'),
                 visible: true
             });
+            vecLayer.set('name', 'vec');
             
             const cvaLayer = new ol.layer.Tile({
-                source: new ol.source.XYZ({
-                    url: `https://t0.tianditu.gov.cn/cva_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cva&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TiandituKeyManager.getCurrentKey()}`,
-                    attributions: '© 天地图'
-                }),
+                source: createTiandituSource('cva'),
                 visible: true
             });
+            cvaLayer.set('name', 'cva');
             
             // 天地图图层 - 影像地图（卫星图）
             const imgLayer = new ol.layer.Tile({
-                source: new ol.source.XYZ({
-                    url: `https://t0.tianditu.gov.cn/img_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TiandituKeyManager.getCurrentKey()}`,
-                    attributions: '© 天地图'
-                }),
+                source: createTiandituSource('img'),
                 visible: false,  // 默认不显示
                 opacity: 1.0    // 默认完全不透明
             });
+            imgLayer.set('name', 'img');
             
             // 天地图影像注记图层
             const ciaLayer = new ol.layer.Tile({
-                source: new ol.source.XYZ({
-                    url: `https://t0.tianditu.gov.cn/cia_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cia&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TiandituKeyManager.getCurrentKey()}`,
-                    attributions: '© 天地图'
-                }),
+                source: createTiandituSource('cia'),
                 visible: false,  // 默认不显示，跟随影像图层
                 opacity: 1.0
             });
+            ciaLayer.set('name', 'cia');
             
             // 多边形图层
             vectorSource = new ol.source.Vector();
