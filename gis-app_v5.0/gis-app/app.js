@@ -8290,6 +8290,8 @@
             AppState.isColored = false;
             AppState.districtColors.clear();
             $('#colorDistricts').removeClass('active');
+            // 关闭重叠面板
+            $('#districtOverlapPanel').remove();
             showMessage('已取消学区着色', 'info');
             return;
         }
@@ -8360,6 +8362,14 @@
         console.log('[着色] 颜色使用情况:', colorUsage);
         
         showMessage(`学区着色完成！共 ${districtGroups.size} 个学区，使用 ${Object.keys(colorUsage).length} 种颜色`, 'success');
+        
+        // ========== 自动检测重叠学区并显示面板 ==========
+        console.log('[着色] 开始检测学区重叠...');
+        setTimeout(() => {
+            const overlaps = calculateDistrictOverlaps();
+            console.log(`[着色] 检测到 ${overlaps.length} 对重叠学区`);
+            showOverlapPanel(overlaps);
+        }, 300); // 短暂延迟以确保着色效果已渲染
     }
     
     /**
@@ -8388,4 +8398,453 @@
         }
     });
 
+    // ========== 学区重叠检测功能 ==========
+    
+    /**
+     * 计算两个多边形之间的重叠面积
+     * 使用turf.js进行空间分析
+     * 返回：{ overlapArea: 重叠面积(平方米), overlapPercent: 重叠百分比, overlapRatio: 相对较小多边形的重叠比例 }
+     */
+    function calculatePolygonOverlap(feature1, feature2) {
+        try {
+            const geom1 = feature1.getGeometry();
+            const geom2 = feature2.getGeometry();
+            
+            if (!geom1 || !geom2) return null;
+            
+            // 转换为GeoJSON格式供turf使用
+            const format = new ol.format.GeoJSON();
+            const geojson1 = format.writeFeatureObject(feature1, {
+                featureProjection: 'EPSG:3857',
+                dataProjection: 'EPSG:4326'
+            });
+            const geojson2 = format.writeFeatureObject(feature2, {
+                featureProjection: 'EPSG:3857',
+                dataProjection: 'EPSG:4326'
+            });
+            
+            // 使用turf计算交集
+            const intersection = turf.intersect(geojson1.geometry, geojson2.geometry);
+            
+            if (!intersection) {
+                return null; // 没有重叠
+            }
+            
+            // 计算重叠面积（平方米）
+            const overlapArea = turf.area(intersection);
+            
+            // 计算两个多边形的面积
+            const area1 = turf.area(geojson1.geometry);
+            const area2 = turf.area(geojson2.geometry);
+            
+            // 计算重叠百分比（相对于两个多边形的总面积）
+            const totalArea = area1 + area2;
+            const overlapPercent = totalArea > 0 ? (overlapArea / totalArea) * 100 : 0;
+            
+            // 计算相对于较小多边形的重叠比例
+            const smallerArea = Math.min(area1, area2);
+            const overlapRatio = smallerArea > 0 ? (overlapArea / smallerArea) * 100 : 0;
+            
+            return {
+                overlapArea: overlapArea,
+                overlapPercent: overlapPercent,
+                overlapRatio: overlapRatio,
+                area1: area1,
+                area2: area2,
+                intersection: intersection
+            };
+        } catch (e) {
+            console.warn('计算重叠时出错:', e);
+            return null;
+        }
+    }
+    
+    /**
+     * 计算所有学区之间的重叠关系
+     * 返回按重叠面积排序的重叠学区数组
+     */
+    function calculateDistrictOverlaps() {
+        const overlaps = [];
+        
+        // 获取所有可见的矢量面要素
+        const allFeatures = vectorSource.getFeatures();
+        const polygonFeatures = allFeatures.filter(feature => {
+            const geometry = feature.getGeometry();
+            if (!geometry) return false;
+            
+            const geomType = geometry.getType();
+            if (geomType !== 'Polygon' && geomType !== 'MultiPolygon') return false;
+            
+            // 检查是否被隐藏
+            const featureFileId = feature.get('sourceFileId');
+            const featureGroupId = feature.get('sourceGroupId');
+            if (featureFileId && featureGroupId) {
+                return !isFileHidden(featureFileId, featureGroupId);
+            }
+            
+            return true;
+        });
+        
+        if (polygonFeatures.length < 2) {
+            return overlaps;
+        }
+        
+        // 按学区分组
+        const districtGroups = groupPolygonsByDistrict(polygonFeatures);
+        const districtIds = Array.from(districtGroups.keys());
+        
+        // 计算每对学区之间的重叠
+        for (let i = 0; i < districtIds.length; i++) {
+            for (let j = i + 1; j < districtIds.length; j++) {
+                const districtId1 = districtIds[i];
+                const districtId2 = districtIds[j];
+                const district1 = districtGroups.get(districtId1);
+                const district2 = districtGroups.get(districtId2);
+                
+                let totalOverlapArea = 0;
+                let maxOverlapRatio = 0;
+                let overlapPairs = [];
+                
+                // 检查两个学区的每个多边形之间的重叠
+                for (const feature1 of district1.features) {
+                    for (const feature2 of district2.features) {
+                        const overlap = calculatePolygonOverlap(feature1, feature2);
+                        if (overlap && overlap.overlapArea > 0) {
+                            totalOverlapArea += overlap.overlapArea;
+                            maxOverlapRatio = Math.max(maxOverlapRatio, overlap.overlapRatio);
+                            overlapPairs.push({
+                                feature1: feature1,
+                                feature2: feature2,
+                                overlapArea: overlap.overlapArea,
+                                overlapRatio: overlap.overlapRatio
+                            });
+                        }
+                    }
+                }
+                
+                // 只记录有显著重叠的学区对（面积大于100平方米或重叠比例大于1%）
+                if (totalOverlapArea > 100 || maxOverlapRatio > 1) {
+                    overlaps.push({
+                        districtId1: districtId1,
+                        districtId2: districtId2,
+                        districtName1: district1.name,
+                        districtName2: district2.name,
+                        groupId1: district1.features[0]?.get('sourceGroupId'),
+                        groupId2: district2.features[0]?.get('sourceGroupId'),
+                        totalOverlapArea: totalOverlapArea,
+                        maxOverlapRatio: maxOverlapRatio,
+                        overlapPairs: overlapPairs,
+                        polygonCount1: district1.features.length,
+                        polygonCount2: district2.features.length
+                    });
+                }
+            }
+        }
+        
+        // 按重叠面积降序排序
+        overlaps.sort((a, b) => b.totalOverlapArea - a.totalOverlapArea);
+        
+        return overlaps;
+    }
+    
+    /**
+     * 格式化面积显示
+     */
+    function formatOverlapArea(area) {
+        if (area >= 1000000) {
+            return (area / 1000000).toFixed(2) + ' km²';
+        } else if (area >= 10000) {
+            return (area / 10000).toFixed(2) + ' 公顷';
+        } else if (area >= 1) {
+            return area.toFixed(1) + ' m²';
+        } else {
+            return area.toFixed(2) + ' m²';
+        }
+    }
+    
+    /**
+     * 显示学区重叠检测面板
+     */
+    function showOverlapPanel(overlaps) {
+        // 移除已存在的面板
+        $('#districtOverlapPanel').remove();
+        
+        const panel = document.createElement('div');
+        panel.id = 'districtOverlapPanel';
+        panel.className = 'district-overlap-panel';
+        
+        // 构建面板内容
+        let content = '';
+        
+        if (overlaps.length === 0) {
+            content = `
+                <div class="overlap-panel-header">
+                    <span><i class="fas fa-check-circle" style="color:#2ecc71;"></i> 学区重叠检测结果</span>
+                    <button class="overlap-panel-close" title="关闭"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="overlap-panel-body">
+                    <div class="overlap-no-result">
+                        <i class="fas fa-check-circle" style="color:#2ecc71;"></i>
+                        <p>未发现学区之间有显著重叠</p>
+                        <p style="font-size:12px;color:#95a5a6;margin-top:10px;">所有学区之间空间关系正常</p>
+                    </div>
+                </div>
+            `;
+        } else {
+            // 按组组织重叠结果
+            const groupedBySeverity = {
+                high: [],   // 重叠面积 > 10000 m² 或 比例 > 20%
+                medium: [], // 重叠面积 > 1000 m² 或 比例 > 5%
+                low: []     // 其他
+            };
+            
+            overlaps.forEach(overlap => {
+                if (overlap.totalOverlapArea > 10000 || overlap.maxOverlapRatio > 20) {
+                    groupedBySeverity.high.push(overlap);
+                } else if (overlap.totalOverlapArea > 1000 || overlap.maxOverlapRatio > 5) {
+                    groupedBySeverity.medium.push(overlap);
+                } else {
+                    groupedBySeverity.low.push(overlap);
+                }
+            });
+            
+            let listHtml = '';
+            
+            // 高风险重叠
+            if (groupedBySeverity.high.length > 0) {
+                listHtml += `
+                    <div class="overlap-severity-section severity-high">
+                        <div class="overlap-severity-title">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            严重重叠（${groupedBySeverity.high.length}对）
+                            <span class="severity-badge">需优先处理</span>
+                        </div>
+                        <div class="overlap-list">
+                            ${groupedBySeverity.high.map((item, index) => `
+                                <div class="overlap-item" data-index="${overlaps.indexOf(item)}">
+                                    <div class="overlap-item-header">
+                                        <div class="overlap-districts">
+                                            <span class="district-name-tag" title="${item.districtName1}">${item.districtName1}</span>
+                                            <span class="overlap-arrow"><i class="fas fa-arrows-alt-h"></i></span>
+                                            <span class="district-name-tag" title="${item.districtName2}">${item.districtName2}</span>
+                                        </div>
+                                        <div class="overlap-metrics">
+                                            <span class="overlap-area"><i class="fas fa-layer-group"></i> ${formatOverlapArea(item.totalOverlapArea)}</span>
+                                            <span class="overlap-ratio"><i class="fas fa-percentage"></i> ${item.maxOverlapRatio.toFixed(1)}%</span>
+                                        </div>
+                                    </div>
+                                    <div class="overlap-item-details">
+                                        <span>学区组${item.groupId1} · ${item.polygonCount1}个多边形</span>
+                                        <span>学区组${item.groupId2} · ${item.polygonCount2}个多边形</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // 中等风险重叠
+            if (groupedBySeverity.medium.length > 0) {
+                listHtml += `
+                    <div class="overlap-severity-section severity-medium">
+                        <div class="overlap-severity-title">
+                            <i class="fas fa-exclamation-circle"></i>
+                            中度重叠（${groupedBySeverity.medium.length}对）
+                            <span class="severity-badge">建议核实</span>
+                        </div>
+                        <div class="overlap-list">
+                            ${groupedBySeverity.medium.map((item, index) => `
+                                <div class="overlap-item" data-index="${overlaps.indexOf(item)}">
+                                    <div class="overlap-item-header">
+                                        <div class="overlap-districts">
+                                            <span class="district-name-tag" title="${item.districtName1}">${item.districtName1}</span>
+                                            <span class="overlap-arrow"><i class="fas fa-arrows-alt-h"></i></span>
+                                            <span class="district-name-tag" title="${item.districtName2}">${item.districtName2}</span>
+                                        </div>
+                                        <div class="overlap-metrics">
+                                            <span class="overlap-area"><i class="fas fa-layer-group"></i> ${formatOverlapArea(item.totalOverlapArea)}</span>
+                                            <span class="overlap-ratio"><i class="fas fa-percentage"></i> ${item.maxOverlapRatio.toFixed(1)}%</span>
+                                        </div>
+                                    </div>
+                                    <div class="overlap-item-details">
+                                        <span>学区组${item.groupId1}</span>
+                                        <span>学区组${item.groupId2}</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // 低风险重叠
+            if (groupedBySeverity.low.length > 0) {
+                listHtml += `
+                    <div class="overlap-severity-section severity-low">
+                        <div class="overlap-severity-title">
+                            <i class="fas fa-info-circle"></i>
+                            轻微重叠（${groupedBySeverity.low.length}对）
+                            <span class="severity-badge">可接受</span>
+                        </div>
+                        <div class="overlap-list">
+                            ${groupedBySeverity.low.map((item, index) => `
+                                <div class="overlap-item" data-index="${overlaps.indexOf(item)}">
+                                    <div class="overlap-item-header">
+                                        <div class="overlap-districts">
+                                            <span class="district-name-tag" title="${item.districtName1}">${item.districtName1}</span>
+                                            <span class="overlap-arrow"><i class="fas fa-arrows-alt-h"></i></span>
+                                            <span class="district-name-tag" title="${item.districtName2}">${item.districtName2}</span>
+                                        </div>
+                                        <div class="overlap-metrics">
+                                            <span class="overlap-area"><i class="fas fa-layer-group"></i> ${formatOverlapArea(item.totalOverlapArea)}</span>
+                                            <span class="overlap-ratio"><i class="fas fa-percentage"></i> ${item.maxOverlapRatio.toFixed(1)}%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            content = `
+                <div class="overlap-panel-header">
+                    <span><i class="fas fa-exclamation-triangle" style="color:#e74c3c;"></i> 学区重叠检测结果</span>
+                    <div class="overlap-header-actions">
+                        <span class="overlap-summary">共发现 ${overlaps.length} 对重叠学区</span>
+                        <button class="overlap-panel-close" title="关闭"><i class="fas fa-times"></i></button>
+                    </div>
+                </div>
+                <div class="overlap-panel-body">
+                    <div class="overlap-legend">
+                        <div class="legend-item"><span class="legend-dot severity-high-dot"></span> 严重 (>10000m² 或 >20%)</div>
+                        <div class="legend-item"><span class="legend-dot severity-medium-dot"></span> 中度 (>1000m² 或 >5%)</div>
+                        <div class="legend-item"><span class="legend-dot severity-low-dot"></span> 轻微 (其他)</div>
+                    </div>
+                    ${listHtml}
+                </div>
+            `;
+        }
+        
+        panel.innerHTML = content;
+        document.body.appendChild(panel);
+        
+        // 定位面板（右上角）
+        panel.style.position = 'fixed';
+        panel.style.top = '80px';
+        panel.style.right = '20px';
+        
+        // 绑定关闭按钮事件
+        panel.querySelector('.overlap-panel-close').addEventListener('click', function() {
+            panel.remove();
+        });
+        
+        // 绑定点击重叠项事件 - 缩放到重叠区域
+        panel.querySelectorAll('.overlap-item').forEach(item => {
+            item.addEventListener('click', function() {
+                const index = parseInt(this.dataset.index);
+                const overlap = overlaps[index];
+                zoomToOverlapArea(overlap);
+            });
+        });
+        
+        // 显示提示
+        if (overlaps.length > 0) {
+            const highCount = overlaps.filter(o => o.totalOverlapArea > 10000 || o.maxOverlapRatio > 20).length;
+            const msg = highCount > 0 
+                ? `检测到 ${overlaps.length} 对重叠学区，其中 ${highCount} 对需要优先处理！` 
+                : `检测到 ${overlaps.length} 对重叠学区，已按面积排序`;
+            showMessage(msg, highCount > 0 ? 'warning' : 'info');
+        }
+    }
+    
+    /**
+     * 缩放到重叠区域
+     */
+    function zoomToOverlapArea(overlap) {
+        if (!overlap || !overlap.overlapPairs || overlap.overlapPairs.length === 0) return;
+        
+        // 计算所有重叠区域的边界
+        const extent = ol.extent.createEmpty();
+        
+        overlap.overlapPairs.forEach(pair => {
+            const geom1 = pair.feature1.getGeometry();
+            const geom2 = pair.feature2.getGeometry();
+            if (geom1) ol.extent.extend(extent, geom1.getExtent());
+            if (geom2) ol.extent.extend(extent, geom2.getExtent());
+        });
+        
+        if (extent && extent[0] !== Infinity) {
+            map.getView().fit(extent, {
+                padding: [100, 100, 100, 400], // 左侧留出空间给面板
+                maxZoom: 18,
+                duration: 800
+            });
+            
+            // 高亮显示相关学区
+            highlightDistrictPair(overlap);
+            
+            showMessage(`已定位到 "${overlap.districtName1}" 与 "${overlap.districtName2}" 的重叠区域`, 'success');
+        }
+    }
+    
+    /**
+     * 高亮显示一对学区
+     */
+    let highlightOverlaySource = null;
+    let highlightOverlayLayer = null;
+    
+    function highlightDistrictPair(overlap) {
+        // 清除之前的高亮
+        if (highlightOverlaySource) {
+            highlightOverlaySource.clear();
+        }
+        
+        // 创建高亮图层（如果不存在）
+        if (!highlightOverlayLayer) {
+            highlightOverlaySource = new ol.source.Vector();
+            highlightOverlayLayer = new ol.layer.Vector({
+                source: highlightOverlaySource,
+                style: new ol.style.Style({
+                    stroke: new ol.style.Stroke({
+                        color: '#e74c3c',
+                        width: 4
+                    }),
+                    fill: new ol.style.Fill({
+                        color: 'rgba(231, 76, 60, 0.3)'
+                    })
+                }),
+                zIndex: 1002
+            });
+            map.addLayer(highlightOverlayLayer);
+        }
+        
+        // 创建高亮要素
+        overlap.overlapPairs.forEach(pair => {
+            const geom1 = pair.feature1.getGeometry();
+            const geom2 = pair.feature2.getGeometry();
+            
+            if (geom1) {
+                const highlight1 = new ol.Feature({
+                    geometry: geom1.clone()
+                });
+                highlightOverlaySource.addFeature(highlight1);
+            }
+            if (geom2) {
+                const highlight2 = new ol.Feature({
+                    geometry: geom2.clone()
+                });
+                highlightOverlaySource.addFeature(highlight2);
+            }
+        });
+        
+        // 5秒后清除高亮
+        setTimeout(() => {
+            if (highlightOverlaySource) {
+                highlightOverlaySource.clear();
+            }
+        }, 5000);
+    }
+    
 })();

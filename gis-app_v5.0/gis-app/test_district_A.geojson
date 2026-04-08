@@ -1,0 +1,23 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "学区A-区域1"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [112.90, 27.85],
+            [112.92, 27.85],
+            [112.92, 27.87],
+            [112.90, 27.87],
+            [112.90, 27.85]
+          ]
+        ]
+      }
+    }
+  ]
+}
