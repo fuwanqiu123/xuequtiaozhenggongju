@@ -330,7 +330,10 @@
         // 识别模式状态
         identifyMode: false,
         identifyClickListener: null,
-        identifyMarker: null
+        identifyMarker: null,
+        // 顶点吸附功能状态
+        vertexSnapEnabled: false,
+        snapPixelTolerance: 15 // 吸附容差（像素）
     };
     
     // 获取当前组的状态
@@ -401,7 +404,8 @@
     let drawInteraction;
     let selectInteraction;
     let modifyInteraction;
-    let snapInteraction;
+    let snapInteraction; // 顶点吸附交互
+    let assistSnapInteraction; // 辅助要素的顶点吸附交互
     // 辅助要素图层
     let assistPolygonSource;
     let assistTextSource;
@@ -1095,6 +1099,53 @@
             $btn.removeClass('all-hidden');
             $btn.html('<i class="fas fa-eye"></i> 本组');
             $btn.attr('title', '隐藏本组所有文件');
+        }
+    }
+    
+    // 切换本组所有文件的锁定状态
+    function toggleGroupFilesLock(groupId) {
+        const group = AppState.groups[groupId];
+        const allFilesCount = group.jsonFiles.length;
+        const lockedFilesCount = group.lockedFiles.size;
+        
+        if (lockedFilesCount < allFilesCount) {
+            // 如果还有未锁定的文件，全部锁定
+            group.jsonFiles.forEach(file => {
+                group.lockedFiles.add(file.id);
+            });
+            showMessage(`已锁定学区组${groupId}的所有文件`, 'info');
+        } else {
+            // 如果全部都已锁定，全部解锁
+            group.lockedFiles.clear();
+            showMessage(`已解锁学区组${groupId}的所有文件`, 'success');
+        }
+        
+        // 刷新地图显示（可能影响可选中状态）
+        vectorSource.changed();
+        
+        // 更新文件列表显示
+        const searchTerm = $(`.fileSearchInput[data-group="${groupId}"]`).val();
+        updateJSONFileList(groupId, searchTerm);
+        
+        // 更新本组全部锁定按钮状态
+        updateGroupLockButton(groupId);
+    }
+    
+    // 更新本组全部锁定按钮状态
+    function updateGroupLockButton(groupId) {
+        const $btn = $(`.btn-toggle-group-lock[data-group="${groupId}"]`);
+        const group = AppState.groups[groupId];
+        const allFilesCount = group.jsonFiles.length;
+        const lockedFilesCount = group.lockedFiles.size;
+        
+        if (allFilesCount > 0 && lockedFilesCount === allFilesCount) {
+            $btn.addClass('all-locked');
+            $btn.html('<i class="fas fa-lock"></i> 本组');
+            $btn.attr('title', '解锁本组所有文件');
+        } else {
+            $btn.removeClass('all-locked');
+            $btn.html('<i class="fas fa-unlock"></i> 本组');
+            $btn.attr('title', '锁定本组所有文件');
         }
     }
     
@@ -2465,6 +2516,15 @@
             // 添加鼠标悬停显示地址功能
             initMouseHoverHandler();
             
+            // 矢量源变化监听 - 着色状态刷新
+            vectorSource.on('change', function() {
+                if (AppState.isColored) {
+                    setTimeout(() => {
+                        refreshColoring();
+                    }, 100);
+                }
+            });
+            
             // 地图初始化完成
             LoadingManager.update('map', 100);
             
@@ -2724,6 +2784,9 @@
         
         // 设置辅助多边形顶点删除处理器（使用原生DOM事件）
         setupAssistVertexDeleteHandler();
+        
+        // 初始化顶点吸附交互（默认不启用）
+        initSnapInteraction();
     }
     
     // ========== 辅助多边形编辑交互 ==========
@@ -2791,6 +2854,93 @@
         
         assistPolygonModifyInteraction.setActive(false);
         map.addInteraction(assistPolygonModifyInteraction);
+    }
+    
+    // ========== 顶点吸附功能 ==========
+    
+    // 初始化顶点吸附交互
+    function initSnapInteraction() {
+        // 创建学区多边形的顶点吸附交互
+        snapInteraction = new ol.interaction.Snap({
+            source: vectorSource,
+            pixelTolerance: AppState.snapPixelTolerance
+        });
+        
+        // 创建辅助要素的顶点吸附交互
+        assistSnapInteraction = new ol.interaction.Snap({
+            source: assistPolygonSource,
+            pixelTolerance: AppState.snapPixelTolerance
+        });
+        
+        // 默认不启用
+        snapInteraction.setActive(false);
+        assistSnapInteraction.setActive(false);
+        
+        map.addInteraction(snapInteraction);
+        map.addInteraction(assistSnapInteraction);
+        
+        console.log('顶点吸附交互已初始化');
+    }
+    
+    // 切换顶点吸附功能的启用状态
+    function toggleVertexSnap() {
+        AppState.vertexSnapEnabled = !AppState.vertexSnapEnabled;
+        
+        const isEnabled = AppState.vertexSnapEnabled;
+        
+        // 更新吸附交互的启用状态
+        if (snapInteraction) {
+            snapInteraction.setActive(isEnabled);
+        }
+        if (assistSnapInteraction) {
+            assistSnapInteraction.setActive(isEnabled);
+        }
+        
+        // 更新UI按钮状态
+        const $btn = $('#toggleVertexSnap');
+        if (isEnabled) {
+            $btn.addClass('active');
+            $btn.css({
+                'background': 'linear-gradient(135deg, #27ae60, #2ecc71)',
+                'color': 'white',
+                'box-shadow': '0 0 8px rgba(46, 204, 113, 0.6)'
+            });
+            showMessage(`顶点吸附已开启 - 编辑时将自动吸附到附近顶点（容差：${AppState.snapPixelTolerance}像素）`, 'success');
+        } else {
+            $btn.removeClass('active');
+            $btn.css({
+                'background': '',
+                'color': '',
+                'box-shadow': ''
+            });
+            showMessage('顶点吸附已关闭', 'info');
+        }
+        
+        console.log('顶点吸附状态:', isEnabled ? '已启用' : '已禁用');
+    }
+    
+    // 更新吸附交互的源（当添加/删除要素后调用）
+    function refreshSnapSources() {
+        if (snapInteraction) {
+            // 移除旧的交互并创建新的（因为OpenLayers的Snap交互不支持动态更换source）
+            map.removeInteraction(snapInteraction);
+            snapInteraction = new ol.interaction.Snap({
+                source: vectorSource,
+                pixelTolerance: AppState.snapPixelTolerance
+            });
+            snapInteraction.setActive(AppState.vertexSnapEnabled);
+            map.addInteraction(snapInteraction);
+        }
+        
+        if (assistSnapInteraction) {
+            map.removeInteraction(assistSnapInteraction);
+            assistSnapInteraction = new ol.interaction.Snap({
+                source: assistPolygonSource,
+                pixelTolerance: AppState.snapPixelTolerance
+            });
+            assistSnapInteraction.setActive(AppState.vertexSnapEnabled);
+            map.addInteraction(assistSnapInteraction);
+        }
     }
     
     // ========== 终极方案：使用原生 DOM 事件监听 ==========
@@ -3700,6 +3850,11 @@
             
             console.log(`多边形绘制完成，ID: ${featureId}, 所属文件: ${currentGroup.selectedJSONFile.name}, 组: ${AppState.currentGroup}`);
             
+            // 刷新顶点吸附源，使新绘制的多边形顶点可被吸附
+            if (AppState.vertexSnapEnabled) {
+                refreshSnapSources();
+            }
+            
             // 提示用户输入多边形名称
             setTimeout(() => {
                 promptPolygonName(feature);
@@ -3951,6 +4106,11 @@
             features.push(feature);
             AppState.assistFeatureMap.set(AppState.selectedAssistFile.id, features);
             AppState.selectedAssistFile.featureCount = features.length;
+            
+            // 刷新顶点吸附源，使新绘制的辅助多边形顶点可被吸附
+            if (AppState.vertexSnapEnabled) {
+                refreshSnapSources();
+            }
             
             updateAssistFileList();
             
@@ -4745,6 +4905,11 @@
                     selectAssistFile(fileId);
                     updateToggleAllAssistButton();
                     
+                    // 刷新顶点吸附源，使导入的辅助多边形顶点可被吸附
+                    if (AppState.vertexSnapEnabled && polygonCount > 0) {
+                        refreshSnapSources();
+                    }
+                    
                     // 缩放到导入的数据范围
                     const extent = ol.extent.createEmpty();
                     importedFeatures.forEach(feature => {
@@ -5182,6 +5347,23 @@
         // 识别按钮状态
         if (AppState.identifyMode) {
             $('#identifyDistricts').addClass('active');
+        }
+        
+        // 顶点吸附按钮状态
+        if (AppState.vertexSnapEnabled) {
+            $('#toggleVertexSnap').addClass('active');
+            $('#toggleVertexSnap').css({
+                'background': 'linear-gradient(135deg, #27ae60, #2ecc71)',
+                'color': 'white',
+                'box-shadow': '0 0 8px rgba(46, 204, 113, 0.6)'
+            });
+        } else {
+            $('#toggleVertexSnap').removeClass('active');
+            $('#toggleVertexSnap').css({
+                'background': '',
+                'color': '',
+                'box-shadow': ''
+            });
         }
     }
     
@@ -5819,6 +6001,11 @@
                 updateToggleGroupButton(grpId);
                 updateToggleAllGroupsButton();
                 selectJSONFile(fileId, grpId);
+                
+                // 刷新顶点吸附源，使导入的多边形顶点可被吸附
+                if (AppState.vertexSnapEnabled && importedFeatures.length > 0) {
+                    refreshSnapSources();
+                }
                 
                 // 居中显示新导入的数据
                 if (successCount > 0 && importedFeatures.length > 0) {
@@ -7176,6 +7363,12 @@
             toggleGroupFilesVisibility(groupId);
         });
         
+        // 各组的全部锁定/解锁按钮
+        $('.btn-toggle-group-lock').on('click', function() {
+            const groupId = $(this).data('group');
+            toggleGroupFilesLock(groupId);
+        });
+        
         // 辅助要素文件选择事件（由侧边栏导入按钮触发）
         $('#assistGeoJSONFile').on('change', function(e) {
             console.log('辅助要素文件已选择', e.target.files);
@@ -7263,6 +7456,9 @@
         $('#editPolygon').on('click', toggleEditPolygon);
         $('#deletePolygon').on('click', deleteSelectedPolygon);
         $('#deleteVertex').on('click', deleteSelectedVertex);
+        
+        // 顶点吸附功能开关
+        $('#toggleVertexSnap').on('click', toggleVertexSnap);
         
         // 测量工具
         $('#measureLength').on('click', function() {
@@ -7721,6 +7917,7 @@
         [1, 2, 3].forEach(groupId => {
             updateJSONFileList(groupId);
             updateToggleGroupButton(groupId);
+            updateGroupLockButton(groupId);
         });
         updateToggleAllGroupsButton();
         updateStatus();
@@ -8386,16 +8583,6 @@
     // 绑定着色按钮事件
     $(document).on('click', '#colorDistricts', function() {
         colorDistricts();
-    });
-    
-    // 在矢量源变化时，如果处于着色状态，刷新着色
-    vectorSource.on('change', function() {
-        // 延迟执行以确保要素已更新
-        if (AppState.isColored) {
-            setTimeout(() => {
-                refreshColoring();
-            }, 100);
-        }
     });
 
     // ========== 学区重叠检测功能 ==========
