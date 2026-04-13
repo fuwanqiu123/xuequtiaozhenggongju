@@ -62,7 +62,7 @@
                         
                         <div class="control-group">
                             <label>缩放比例: <span id="scaleValue">1.0x</span></label>
-                            <input type="range" id="scaleSlider" min="0.1" max="5" step="0.1" value="1" tabindex="2">
+                            <input type="range" id="scaleSlider" min="0.1" max="5" step="0.02" value="1" tabindex="2">
                         </div>
                         
                         <div class="control-group">
