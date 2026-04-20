@@ -5818,9 +5818,10 @@
                 updateToggleGroupButton(grpId);
                 updateToggleAllGroupsButton();
                 
-                // 如果有导入成功的文件，选中最后一个
+                // 如果有导入成功的文件，缩放到所有导入数据的范围
                 if (importedCount > 0 && group.jsonFiles.length > 0) {
-                    selectJSONFile(group.jsonFiles[group.jsonFiles.length - 1].id, grpId);
+                    // 不再自动选中新导入的最后一个文件，保持当前选中状态不变
+                    // （用户通常希望继续停留在默认学区图层上）
                     
                     // 缩放到所有导入数据的范围
                     const extent = ol.extent.createEmpty();
@@ -8261,11 +8262,12 @@
                 dataProjection: 'EPSG:4326'
             });
             
-            // 使用turf检查是否相交
-            const intersection = turf.intersect(geojson1.geometry, geojson2.geometry);
-            
-            // 如果有交集（包括边界接触），返回true
-            return intersection !== null;
+            // 使用turf检查是否相交（包括面积重叠和共享边界）
+            // 注意：必须使用 booleanIntersects 而非 intersect，
+            // 因为 intersect 只在两个多边形有面积重叠时才返回结果，
+            // 而对于拓扑修复后完美贴合、仅共享边界的相邻多边形会返回 null，
+            // 导致它们被误判为不相邻，从而使着色算法几乎只使用一种颜色。
+            return turf.booleanIntersects(geojson1.geometry, geojson2.geometry);
         } catch (e) {
             console.warn('判断相邻时出错:', e);
             return false;
@@ -8397,11 +8399,16 @@
      * 保存当前所有要素的原始样式
      */
     function saveOriginalStyles(features) {
-        AppState.originalStyles.clear();
+        // 只保存尚未记录原始样式的要素。
+        // 如果直接 clear() 后全部保存，当 refreshColoring() 触发时，
+        // feature.getStyle() 返回的是已被着色的样式，会覆盖真正的原始样式，
+        // 导致后续取消着色时无法恢复。
         features.forEach(feature => {
             const featureId = feature.getId();
-            const currentStyle = feature.getStyle();
-            AppState.originalStyles.set(featureId, currentStyle);
+            if (!AppState.originalStyles.has(featureId)) {
+                const currentStyle = feature.getStyle();
+                AppState.originalStyles.set(featureId, currentStyle);
+            }
         });
     }
     
@@ -8486,6 +8493,7 @@
             restoreOriginalStyles();
             AppState.isColored = false;
             AppState.districtColors.clear();
+            AppState.originalStyles.clear();
             $('#colorDistricts').removeClass('active');
             // 关闭重叠面板
             $('#districtOverlapPanel').remove();
